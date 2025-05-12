@@ -1,0 +1,802 @@
+---
+title: "MIRS_wheat_proteins"
+author: "Dedy Leonardo Nadeak"
+format: pdf
+editor: visual
+---
+
+## Data Analysis for "Mid-Infrared Spectroscopy for the Qualitative and Quantitative Analysis of the Wheat Proteome"
+
+Data analysis procedures to be performed, which include both qualitative and quantitative approaches:
+
+1.  Preparation
+
+    -   Importing data
+
+    -   Outlier test (Hotelling's T2 and Orthogonal Distance Test)
+
+2.  Quantitative Analysis
+
+    -   Protein calibrant calculation
+    -   Samples calculation
+    -   Limit of Quantification
+    -   Normality Test (Shapiro Wilk's Test)
+    -   ANOVA followed by Tukey's HSD Test.
+    -   Relative Mean Comparison
+    -   Resume and Plotting
+        -   Resume
+        -   Protein calibrants
+        -   Protein Fractions in each location
+        -   Relative mean comparison
+
+3.  Qualitative Analysis
+
+    -   Pre-processing
+    -   PCA analysis
+    -   Secondary Structures
+        -   Albumins
+        -   Globulins
+        -   Gliadins
+        -   Glutenins
+    -   Resume and Plotting
+        -   Spectra
+        -   PCA
+
+## Preparation
+
+### Importing data
+
+```{r}
+# import the samples data
+data <- read.csv("data/wheat_samples.csv")
+
+#prepare the dataframe
+source('code/preparation.R')
+prot_data <- prepare_df(data, 1480, 1710)
+
+#split the data into a list based on protein type
+prot_data_list <- split(prot_data, gl(4, 180, nrow(data)))
+```
+
+### Hotelling's T2 and Orthogonal Distance Test
+
+```{r}
+library(mdatools)
+
+hotelling_test <- lapply(seq_along(prot_data_list), function(i){
+  h_test <- prot_data_list[[i]][,-1] # remove the first column
+  model <- pca(h_test, ncomp = 4, center = F, scale = F, info = "outlier test")
+  return(model)
+})
+
+##Hotelling and Orthogonal Test
+### albumins
+plotResiduals(hotelling_test[[1]], cgroup = categorize(hotelling_test[[1]]), show.labels = T) #free of outliers
+
+### globulins
+plotResiduals(hotelling_test[[2]], cgroup = categorize(hotelling_test[[2]]), show.labels = T) #free of outliers
+
+### gliadins
+plotResiduals(hotelling_test[[3]], cgroup = categorize(hotelling_test[[3]]), show.labels = T) #free of outliers
+
+### glutenins
+plotResiduals(hotelling_test[[4]], cgroup = categorize(hotelling_test[[4]]), show.labels = T) #free of outliers
+```
+
+## Quantitative analysis
+
+### Protein calibrants calculation
+
+```{r}
+# importing the dataframe
+calibrant <- read.csv("data/calibrant.csv")
+
+#prepare the dataframe
+source('code/preparation.R')
+prot_calibrant <- prepare_df(calibrant[,-2], 1480, 1710)
+conc_calibrant <- calibrant[,2]
+
+#baseline correction and smoothing
+prot_calibrant <- smoothing(prot_calibrant, width = 11, porder = 3)
+prot_calibrant <- baseline_corr(prot_calibrant)
+
+#split the data into a list based on protein type
+prot_calibrant_list <- split(prot_calibrant, gl(4, 18, nrow(prot_calibrant)))
+
+## selecting the amide II band
+#albumins
+prot_calibrant_list[[1]] <- prepare_df(prot_calibrant_list[[1]], 1484, 1591)
+#globulins
+prot_calibrant_list[[2]] <- prepare_df(prot_calibrant_list[[2]], 1484, 1592)
+#gliadins
+prot_calibrant_list[[3]] <- prepare_df(prot_calibrant_list[[3]], 1480, 1586)
+#glutenins
+prot_calibrant_list[[4]] <- prepare_df(prot_calibrant_list[[4]], 1480, 1584)
+
+## integrate all calibrant
+library(DescTools)
+auc_calibrant <- lapply(seq_along(prot_calibrant_list), function(i){
+  df <- prot_calibrant_list[[i]]
+  wavenumber <- as.numeric(colnames(df)[-1])
+  
+  # Calculate AUC for each row (spectrum)
+  auc_values <- apply(df[,-1], 1, function(j) {
+    AUC(wavenumber, j, method = "trapezoid")
+  })
+  
+  output <- data.frame(samples = df[,1], area = auc_values)
+  return(output)
+  })
+
+# add the concentration
+auc_calibrant[[1]]$conc <- conc_calibrant[1:18]
+auc_calibrant[[2]]$conc <- conc_calibrant[19:36]
+auc_calibrant[[3]]$conc <- conc_calibrant[37:54]
+auc_calibrant[[4]]$conc <- conc_calibrant[55:72]
+
+#average the absorbance of calibrants
+library(dplyr)
+avg_calibrant <- lapply(seq_along(auc_calibrant), function(i){
+  df <- auc_calibrant[[i]]
+  output <- df %>%
+    mutate(group = substr(samples, 1, nchar(samples)-2)) %>%
+    group_by(group) %>%
+    summarise(
+      mean_auc = mean(area, na.rm = TRUE),   
+      sd_auc = sd(area, na.rm = TRUE),
+      mean_conc = mean(conc, na.rm = TRUE)
+  )
+  
+  return(output)
+})
+
+#create the calibration curves
+calibration_curves <- lapply(seq_along(avg_calibrant), function(i){
+  df <- avg_calibrant[[i]]
+  output <- lm(mean_auc ~ mean_conc, data = df)
+  return(output)
+})
+
+# Extract slope, intercept, R^2, and adjusted R^2
+calibration_summary <- lapply(calibration_curves, function(mod) {
+  s <- summary(mod)
+  coefs <- coef(mod)
+  
+  data.frame(
+    intercept = coefs[1],
+    slope = coefs[2],
+    r_squared = s$r.squared,
+    adj_r_squared = s$adj.r.squared
+  )
+})
+
+## All results
+protein_titles <- c("Albumins", "Globulins", "Gliadins", "Glutenins")
+names(calibration_summary) <- protein_titles
+cal_summary <- do.call(rbind, calibration_summary)
+```
+
+### Samples calculation
+
+```{r}
+#baseline correction and smoothing
+samples_list <- lapply(seq_along(prot_data_list), function(i){
+  smoothing(prot_data_list[[i]], width = 11, porder = 3)
+})
+samples_list <- lapply(seq_along(samples_list), function(i){
+  baseline_corr(prot_data_list[[i]])
+})
+
+#selecting the amide II band
+#albumins
+samples_list[[1]] <- prepare_df(samples_list[[1]], 1484, 1591)
+#globulins
+samples_list[[2]] <- prepare_df(samples_list[[2]], 1484, 1592)
+#gliadins
+samples_list[[3]] <- prepare_df(samples_list[[3]], 1480, 1586)
+#glutenins
+samples_list[[4]] <- prepare_df(samples_list[[4]], 1480, 1584)
+
+#integrate all samples list
+auc_samples <- lapply(seq_along(samples_list), function(i){
+  df <- samples_list[[i]]
+  wavenumber <- as.numeric(colnames(df)[-1])
+  
+  # Calculate AUC for each row (spectrum)
+  auc_values <- apply(df[,-1], 1, function(j) {
+    AUC(wavenumber, j, method = "trapezoid")
+  })
+  
+  output <- data.frame(samples = df[,1], area = auc_values)
+  return(output)
+  })
+names(auc_samples) <- protein_titles
+
+
+#calculate the concentration of all samples
+#albumins
+auc_samples[[1]]$conc <- (auc_samples[[1]]$area - cal_summary$intercept[1])/cal_summary$slope[1]*20*100/2000
+#globulins
+auc_samples[[2]]$conc <- (auc_samples[[2]]$area - cal_summary$intercept[2])/cal_summary$slope[2]*20*100/2000
+#gliadins
+auc_samples[[3]]$conc <- (auc_samples[[3]]$area - cal_summary$intercept[3])/cal_summary$slope[3]*30*100/2000
+#glutenins
+auc_samples[[4]]$conc <- (auc_samples[[4]]$area - cal_summary$intercept[4])/cal_summary$slope[4]*30*100/2000
+
+#removing some data that don't have a good replication
+auc_samples[[3]] <- auc_samples[[3]][-c(42, 63, 143, 145, 149, 156),]
+auc_samples[[4]] <- auc_samples[[4]][-c(24, 42, 53, 57, 61, 66, 79, 83, 96, 115, 121, 131, 135, 145, 151, 167),]
+
+#average all results
+avg_samples <- lapply(seq_along(auc_samples), function(i){
+  df <- auc_samples[[i]]
+  output <- df %>%
+    mutate(group = substr(samples, 1, nchar(samples)-2)) %>%
+    group_by(group) %>%
+    summarise(
+      mean_conc = mean(conc, na.rm = TRUE),
+      rsd = round(sd(area)/mean(area)*100,1),
+      sd2 = 2*rsd*mean_conc/100
+  )
+  
+  return(output)
+})
+names(avg_samples) <- protein_titles
+
+#average all rsd
+cal_summary$rsd <- c(
+  mean(avg_samples[[1]]$rsd),
+  mean(avg_samples[[2]]$rsd),
+  mean(avg_samples[[3]]$rsd),
+  mean(avg_samples[[4]]$rsd)
+  ) 
+```
+
+### Limit of Quantification
+
+```{r}
+#import the data
+loq <- read.csv("data/loq.csv")
+
+#prepare the dataframe
+loq <- prepare_df(loq, 1480, 1710)
+
+#baseline correction and smoothing
+loq <- smoothing(loq, width = 11, porder = 3)
+loq <- baseline_corr(loq)
+
+#split the data into a list based on protein type
+loq_list <- split(loq, gl(4, 10, nrow(loq)))
+
+#selecting the amide II band
+#albumins
+loq_list[[1]] <- prepare_df(loq_list[[1]], 1484, 1591)
+#globulins
+loq_list[[2]] <- prepare_df(loq_list[[2]], 1484, 1592)
+#gliadins
+loq_list[[3]] <- prepare_df(loq_list[[3]], 1480, 1586)
+#glutenins
+loq_list[[4]] <- prepare_df(loq_list[[4]], 1480, 1584)
+
+#integrate all samples list
+auc_loq <- lapply(seq_along(loq_list), function(i){
+  df <- loq_list[[i]]
+  wavenumber <- as.numeric(colnames(df)[-1])
+  
+  # Calculate AUC for each row (spectrum)
+  auc_values <- apply(df[,-1], 1, function(j) {
+    AUC(wavenumber, j, method = "trapezoid")
+  })
+  
+  output <- data.frame(samples = df[,1], area = auc_values)
+  return(output)
+  })
+names(auc_loq) <- protein_titles
+
+#Limit of quantification
+cal_summary$loq <- c(
+  10*sd(auc_loq[[1]]$area)/cal_summary$slope[1],
+  10*sd(auc_loq[[2]]$area)/cal_summary$slope[2],
+  10*sd(auc_loq[[3]]$area)/cal_summary$slope[3],
+  10*sd(auc_loq[[4]]$area)/cal_summary$slope[4]
+  )
+cal_summary
+```
+
+### Normality Test (Shapiro Wilk's Test)
+
+```{r}
+normality_test <- lapply(seq_along(avg_samples), function(i){
+  df <- avg_samples[[i]]
+  protein <- protein_titles[i]
+  output <- df %>%
+    mutate(location = sub("_.*$", "", group)) %>%
+    group_by(location) %>%
+    summarise(
+      protein = protein,
+      p_value = shapiro.test(mean_conc)$p.value
+    )
+})
+names(normality_test) <- protein_titles
+normality_summary <- do.call(rbind, normality_test)
+normality_summary
+```
+
+### ANOVA followed by Tukey's HSD Test.
+
+```{r}
+#create a new column based on location
+avg_samples <- lapply(seq_along(avg_samples), function(i){
+  df <- avg_samples[[i]]
+  output <- df %>%
+    mutate(location = as.factor(sub("_.*$", "", group))) %>%
+    mutate(protein = sub("^[^_]+_([^_]+)_.*$", "\\1", group))
+  return(output)
+})
+
+## Perform ANOVA and Tukey test
+tukey_results <- lapply(seq_along(avg_samples), function(i){
+  df <- avg_samples[[i]]
+  anova_res <- aov(mean_conc~location, data = df)
+  output <- TukeyHSD(anova_res)$location
+  
+  return(output)
+})
+
+# Extract significant pairs for annotations
+significant_pairs <- lapply(seq_along(tukey_results), function(i) {
+  # Convert Tukey HSD result to a data frame
+  sig <- as.data.frame(tukey_results[[i]])
+  
+  # Keep only significant comparisons (p adj < 0.05)
+  sig <- subset(sig, `p adj` < 0.05)
+  
+  # Split row names into group1 and group2
+  sig$Group1 <- sapply(strsplit(rownames(sig), "-"), `[`, 1)
+  sig$Group2 <- sapply(strsplit(rownames(sig), "-"), `[`, 2)
+  
+  # Select relevant columns
+  sig <- sig[, c("Group1", "Group2", "p adj", "diff")]
+  
+  # Rename columns for consistency
+  colnames(sig) <- c("group1", "group2", "p.adj", "y.position")
+  
+  # Reference dataset for this protein
+  data <- avg_samples[[i]]
+  
+  # Find the maximum value of content for this protein's dataset
+  max_cont <- max(data$mean_conc, na.rm = TRUE)
+  
+  # Set base position to the maximum value + a small offset (e.g., 0.1)
+  base_position <- max_cont + max_cont*0.05
+  
+  # Calculate y.position for each significant pair, with incremental spacing
+  sig$y.position <- seq(from = base_position, by = 0.4, length.out = nrow(sig))
+  
+  # Convert p-values to stars
+  sig$p.signif <- ifelse(sig$p.adj < 0.0001, "****", 
+                      ifelse(sig$p.adj < 0.001, "***",
+                          ifelse(sig$p.adj < 0.01, "**",
+                             ifelse(sig$p.adj < 0.05, "*", "NS"))))
+  sig$protein <- protein_titles[i]
+  return(sig)
+})
+significant_summary <- do.call(rbind, significant_pairs)
+```
+
+### Relative Mean Comparisons
+
+```{r}
+#prepare the dataframe 
+names(avg_samples) <- protein_titles
+prot_content <- do.call(cbind, avg_samples)
+rm <- prot_content[,c(5, 2, 8, 14, 20)]
+colnames(rm) <- c("Location", protein_titles)
+
+#calculate the mean protein for each region.
+rm_comparison <- rm %>%
+  mutate(total = rowSums(across(Albumins:Glutenins))) %>%
+  mutate(across(Albumins:Glutenins, ~./total*100, .names = "rel_{.col}")) %>%
+  select(Location, starts_with("rel_"))
+
+rmc <- rm_comparison %>% group_by(Location) %>% summarise(across(1:4, mean))
+colnames(rmc)[2:5] <- protein_titles
+
+rmc_stdev <- rm_comparison %>% group_by(Location) %>% summarise(across(1:4, ~2 * sd(.)))
+colnames(rmc_stdev)[2:5] <- protein_titles
+```
+
+### Resume and Plotting
+
+#### Resume
+
+```{r}
+print(cal_summary)
+
+print(significant_summary)
+```
+
+#### Plot of Protein Calibrants
+
+```{r}
+df_calibrant <- do.call(rbind, avg_calibrant)
+df_calibrant <- df_calibrant %>%
+  mutate(proteins = as.factor(sub("_.*$", "", group)))
+
+#call the function
+source("code/plotting.R")
+p_calibration <- calibration_curve(df_calibrant, 
+                                   x = "mean_conc", 
+                                   y = "mean_auc", 
+                                   col = "proteins", 
+                                   shape = "proteins")
+p_calibration
+```
+
+#### Plot of Protein Fractions in each location
+
+```{r}
+source("code/plotting.R")
+p_samples <- lapply(seq_along(avg_samples), function(i){
+  box_plot(avg_samples[[i]],
+           x = "location",
+           y = "mean_conc",
+           col = "location",
+           title = NULL)
+})
+
+#combine with tukey
+p_tukey <- lapply(seq_along(p_samples), function(i){
+  p_samples[[i]] +
+  stat_pvalue_manual(significant_pairs[[i]], label = "p.signif", step_increase = 0.5) 
+})
+
+#combine all location
+df_samples <- do.call(rbind, avg_samples)
+comparison_samples_plot <- comp_box_plot(df_samples,
+                                         x = "protein",
+                                         y = "mean_conc",
+                                         col = "location")
+
+## combine with the calibrants
+combined_cal <- ggarrange(
+  p_calibration, comparison_samples_plot,
+  ncol = 2,
+  labels = c("A", "B"),
+  widths = c(0.4, 0.6),
+  font.label = list(size = 13, color = "black", face = "bold", family = "Arial")
+)
+
+combined_cal
+```
+
+#### Relative Mean Comparison
+
+```{r}
+#prepare the dataframe
+library(reshape2)
+rmc_long <- melt(rmc)
+rmc_long$Location <- as.factor(rmc_long$Location)
+
+source("code/plotting.R")
+rmc_plot <- gbar_plot(rmc_long, x = "Location", y = "value", fill = "variable", col = "variable")
+rmc_plot
+```
+
+## Qualitative Analysis
+
+### Pre-processing
+
+```{r}
+# Removing some data that don't have a good replication
+spectra <- prot_data_list
+spectra[[3]] <- spectra[[3]][-c(42, 63, 143, 145, 149, 156),]
+spectra[[4]] <- spectra[[4]][-c(24, 42, 53, 57, 61, 66, 79, 83, 96, 115, 121, 131, 135, 145, 151, 167),]
+
+#baseline correction and smoothing
+spectra_bs <- lapply(seq_along(spectra), function(i){
+  smoothing(spectra[[i]], width = 11, porder = 3)
+})
+spectra_bs <- lapply(seq_along(spectra_bs), function(i){
+  baseline_corr(spectra_bs[[i]])
+})
+
+# Averaging the spectra
+avg_spectra <- lapply(seq_along(spectra_bs), function(i){
+  df <- spectra_bs[[i]]
+  output <- df %>%
+    mutate(group = substr(samples, 1, nchar(samples)-2)) %>%
+    group_by(group) %>%
+    summarise(across(where(is.numeric), mean))
+  
+  return(output)
+})
+
+# First derivative in all spectra
+avg_spectra_d1 <- lapply(seq_along(avg_spectra), function(i){
+  derivative(avg_spectra[[i]], width = 11, porder = 3, dorder = 1)
+})
+
+# Second derivative in all spectra
+avg_spectra_d2 <- lapply(seq_along(avg_spectra), function(i){
+  derivative(avg_spectra[[i]], width = 11, porder = 3, dorder = 2)
+})
+```
+
+### PCA Analysis
+
+#### Raw Spectra
+
+```{r}
+#combining all spectra
+source('code/preparation.R')
+all_sp <- combine(avg_spectra)
+
+#PCA analysis
+library(mdatools)
+all_sp_pca <- pca(all_sp, ncomp = 4, center = T, scale = T, info = "Raw Spectra")
+
+#extract the score
+all_sp_score <- as.data.frame(all_sp_pca$res$cal$scores)
+all_sp_score <- all_sp_score %>%
+  mutate(location = as.factor(sub("_.*$", "", avg_spectra[[1]]$group)))
+```
+
+#### First Derivative
+
+```{r}
+#combining all spectra
+all_sp_d1 <- combine(avg_spectra_d1)
+
+#PCA analysis
+all_sp_d1_pca <- pca(all_sp_d1, ncomp = 4, center = T, scale = T, info = "First Derivative Spectra")
+
+#extract the score
+all_sp_d1_score <- as.data.frame(all_sp_d1_pca$res$cal$scores)
+all_sp_d1_score <- all_sp_d1_score %>%
+  mutate(location = as.factor(sub("_.*$", "", avg_spectra[[1]]$group)))
+```
+
+#### Second Derivative
+
+```{r}
+#combining all spectra
+all_sp_d2 <- combine(avg_spectra_d2)
+
+#PCA analysis
+all_sp_d2_pca <- pca(all_sp_d2, ncomp = 4, center = T, scale = T, info = "Second Derivative Spectra")
+
+#extract the score
+all_sp_d2_score <- as.data.frame(all_sp_d2_pca$res$cal$scores)
+all_sp_d2_score <- all_sp_d2_score %>%
+  mutate(location = as.factor(sub("_.*$", "", avg_spectra[[1]]$group)))
+```
+
+### Secondary Structure
+
+#### Albumins
+
+```{r}
+## import the dataframe
+str_alb <- read.csv("secondary_structure/data/p_alb.csv")
+
+#separate the dataframe
+wavenumber2 <- sort(str_alb[,14])
+str_alb1 <- cbind(wavenumber2, str_alb[,9:13])
+str_alb2 <- str_alb[,14:15]
+
+#rename the columns
+colnames(str_alb1) <- c("wavenumber", "\u03B2-turn", "\u03B1-helix", "\u03B2-sheet", "\u03B2-sheet1", "side chain")
+
+#create a long version
+str_alb1_long <- str_alb1 %>% pivot_longer(cols = -wavenumber, names_to = "variable", values_to = "value")
+str_alb2_long <- str_alb2 %>% pivot_longer(cols = -wavenumber, names_to = "variable", values_to = "value")
+
+#call the function
+source("code/plotting.R")
+alb_label <- c("side chain", "\u03B1-helix", "\u03B2-sheet", "\u03B2-sheet", "\u03B2-turn")
+str_albumins <- structure_plot(str_alb1_long, str_alb2_long, "#e66101", label = alb_label)
+str_albumins
+```
+
+#### Globulins
+
+```{r}
+## import the dataframe
+str_glo <- read.csv("secondary_structure/data/p_glo.csv")
+
+#separate the dataframe
+wavenumber2 <- sort(str_glo[,14])
+str_glo1 <- cbind(wavenumber2, str_glo[,9:13])
+str_glo2 <- str_glo[,14:15]
+
+#rename the columns
+colnames(str_glo1) <- c("wavenumber", "\u03B2-sheet", "\u03B2-turn", "\u03B1-helix", "\u03B2-sheet1", "side chain")
+
+#create a long version
+str_glo1_long <- str_glo1 %>% pivot_longer(cols = -wavenumber, names_to = "variable", values_to = "value")
+str_glo2_long <- str_glo2 %>% pivot_longer(cols = -wavenumber, names_to = "variable", values_to = "value")
+
+#call the function
+source("code/plotting.R")
+glo_label <- c("side chain", "\u03B1-helix", "\u03B2-sheet", "\u03B2-sheet", "\u03B2-turn")
+str_globulins <- structure_plot(str_glo1_long, str_glo2_long, "#fdb863", label = glo_label)
+str_globulins
+```
+
+#### Gliadins
+
+```{r}
+## import the dataframe
+str_gli <- read.csv("secondary_structure/data/p_gli.csv")
+
+#separate the dataframe
+wavenumber2 <- sort(str_gli[,14])
+str_gli1 <- cbind(wavenumber2, str_gli[,9:13])
+str_gli2 <- str_gli[,14:15]
+
+#rename the columns name
+colnames(str_gli1)[1] <- "wavenumber"
+
+#create a long version
+str_gli1_long <- str_gli1 %>% pivot_longer(cols = -wavenumber, names_to = "variable", values_to = "value")
+str_gli2_long <- str_gli2 %>% pivot_longer(cols = -wavenumber, names_to = "variable", values_to = "value")
+
+#running the source code
+gli_label <- c("\u03B1-helix", "\u03B2-sheet", "\u03B2-turn", "\u03B2-turn", "side chain")
+str_gliadins <- structure_plot(str_gli1_long, str_gli2_long, col = "#b2abd2", label=gli_label)
+str_gliadins
+```
+
+#### Glutenins
+
+```{r}
+## import the dataframe
+str_glu <- read.csv("secondary_structure/data/p_glu.csv")
+
+#separate the dataframe
+wavenumber2 <- sort(str_glu[,16])
+str_glu1 <- cbind(wavenumber2, str_glu[,9:15])
+str_glu2 <- str_glu[,16:17]
+
+#rename the columns name
+colnames(str_glu1)[1] <- "wavenumber"
+
+#create a long version
+str_glu1_long <- str_glu1 %>% pivot_longer(cols = -wavenumber, names_to = "variable", values_to = "value")
+str_glu2_long <- str_glu2 %>% pivot_longer(cols = -wavenumber, names_to = "variable", values_to = "value")
+  
+#running the source code
+source("code/plotting.R")
+glu_label <- c("\u03B2-turn", "\u03B2-turn","\u03B1-helix", "random", "", "\u03B2-sheet", "side chain")
+str_glutenins <- structure_plot(str_glu1_long, str_glu2_long, "#5e3c99", label = glu_label)
+str_glutenins
+```
+
+### Resume and Plotting
+
+#### Plot of Spectra
+
+```{r}
+## prepare raw spectra dataframe
+avg_spectra2 <- lapply(seq_along(spectra), function(i){
+  df <- spectra[[i]]
+  output <- df %>%
+    mutate(group = substr(samples, 1, nchar(samples)-2)) %>%
+    group_by(group) %>%
+    summarise(across(where(is.numeric), mean))
+  
+  return(output)
+})
+
+#smoothing
+avg_spectra2 <- lapply(seq_along(avg_spectra2), function(i){
+  smoothing(avg_spectra2[[i]], width = 21, porder = 3)
+})
+
+#create a long dataframe for raw spectra
+avg_spectra_long <- lapply(avg_spectra2, melt)
+avg_spectra_long <- lapply(seq_along(avg_spectra_long), function(i){
+  df <- avg_spectra_long[[i]]
+  df <- df %>%
+    mutate(location = as.factor(sub("_.*$", "", df$group)))
+  df$variable <- as.character(df$variable)
+  df$variable <- as.numeric(df$variable)
+  colnames(df) <- c("samples", "wavenumber", "value", "location")
+  return(df)
+})
+
+#call the function for plotting
+source("code/plotting.R")
+mir_plots <- lapply(seq_along(avg_spectra_long), function(i){
+  df <- avg_spectra_long[[i]]
+  spectra_plot(input = df,
+               x = df[,2],
+               y = df[,3],
+               group = df[,1],
+               color = df[,4],
+               title = NULL)
+})
+mir_plots[[4]]
+```
+
+```{r}
+##First Derivative
+#create a long dataframe
+avg_spectra_d1_long <- lapply(avg_spectra_d1, melt)
+avg_spectra_d1_long <- lapply(seq_along(avg_spectra_d1_long), function(i){
+  df <- avg_spectra_d1_long[[i]]
+  df <- df %>%
+    mutate(location = as.factor(sub("_.*$", "", df$group)))
+  df$variable <- as.character(df$variable)
+  df$variable <- as.numeric(df$variable)
+  colnames(df) <- c("samples", "wavenumber", "value", "location")
+  return(df)
+})
+
+#call the function for plotting
+mir_plots_d1 <- lapply(seq_along(avg_spectra_d1_long), function(i){
+  df <- avg_spectra_d1_long[[i]]
+  spectra_plot(input = df,
+               x = df[,2],
+               y = df[,3],
+               group = df[,1],
+               color = df[,4],
+               title = NULL)
+})
+```
+
+```{r}
+##Second Derivative
+#create a long dataframe
+avg_spectra_d2_long <- lapply(avg_spectra_d2, melt)
+avg_spectra_d2_long <- lapply(seq_along(avg_spectra_d2_long), function(i){
+  df <- avg_spectra_d2_long[[i]]
+  df <- df %>%
+    mutate(location = as.factor(sub("_.*$", "", df$group)))
+  df$variable <- as.character(df$variable)
+  df$variable <- as.numeric(df$variable)
+  colnames(df) <- c("samples", "wavenumber", "value", "location")
+  return(df)
+})
+
+#call the function for plotting
+mir_plots_d2 <- lapply(seq_along(avg_spectra_d2_long), function(i){
+  df <- avg_spectra_d2_long[[i]]
+  spectra_plot(input = df,
+               x = df[,2],
+               y = df[,3],
+               group = df[,1],
+               color = df[,4],
+               title = NULL)
+})
+```
+
+#### PCA
+
+```{r}
+## Score plot for Raw
+source('code/plotting.R')
+#score plot
+raw_plot <- pca_plot(all_sp_score, all_sp_pca, title = NULL)
+
+#loading plot
+raw_loading <- pca_combined_loading(all_sp_pca, NULL)
+raw_loading
+```
+
+```{r}
+## Score plot for First Derivative
+#score plot
+d1_plot <- pca_plot(all_sp_d1_score, all_sp_d1_pca, title = NULL)
+#loading plot
+d1_loading <- pca_combined_loading(all_sp_d1_pca, NULL)
+```
+
+```{r}
+## Score plot for First Derivative
+#score plot
+d2_plot <- pca_plot(all_sp_d2_score, all_sp_d2_pca, title = NULL)
+#loading plot
+d2_loading <- pca_combined_loading(all_sp_d2_pca, NULL)
+```
