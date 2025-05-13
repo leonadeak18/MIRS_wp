@@ -183,7 +183,7 @@ structure_plot <- function(input1, input2, col, label){
     y_limit <- max_y*1.20
   }
   else{
-    y_limit <- max(input2[,3])
+    y_limit <- max(input2[,3])*1.20
   }
   
   p <- ggplot() +

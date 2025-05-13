@@ -42,6 +42,22 @@ Data analysis procedures to be performed, which include both qualitative and qua
         -   Spectra
         -   PCA
 
+4.  Data and Figure for Paper
+
+    -   Figure 1
+
+    -   Figure 2
+
+    -   Figure 3
+
+    -   Table S3
+
+    -   Figure S2
+
+    -   Figure S3
+
+    -   Figure S4
+
 ## Preparation
 
 ### Importing data
@@ -458,16 +474,7 @@ comparison_samples_plot <- comp_box_plot(df_samples,
                                          y = "mean_conc",
                                          col = "location")
 
-## combine with the calibrants
-combined_cal <- ggarrange(
-  p_calibration, comparison_samples_plot,
-  ncol = 2,
-  labels = c("A", "B"),
-  widths = c(0.4, 0.6),
-  font.label = list(size = 13, color = "black", face = "bold", family = "Arial")
-)
 
-combined_cal
 ```
 
 #### Relative Mean Comparison
@@ -799,4 +806,196 @@ d1_loading <- pca_combined_loading(all_sp_d1_pca, NULL)
 d2_plot <- pca_plot(all_sp_d2_score, all_sp_d2_pca, title = NULL)
 #loading plot
 d2_loading <- pca_combined_loading(all_sp_d2_pca, NULL)
+```
+
+## Data and Figure for Paper
+
+### Figure 1
+
+```{r}
+# Remove x-axis labels and ticks for the top row
+mir_plots[[1]] <- mir_plots[[1]] + theme(axis.title.x = element_blank())
+mir_plots[[2]] <- mir_plots[[2]] + theme(axis.title.x = element_blank(), axis.title.y = element_blank())
+mir_plots[[3]] <- mir_plots[[3]] + theme(axis.title.x = element_blank(), axis.title.y = element_blank())
+mir_plots[[4]] <- mir_plots[[4]] + theme(axis.title.x = element_blank(), axis.title.y = element_blank())
+
+#secondary structure
+str_albumins <- str_albumins + theme(axis.title.x = element_blank())
+str_globulins <- str_globulins + theme(axis.title.x = element_blank(), axis.title.y = element_blank())
+str_gliadins <- str_gliadins + theme(axis.title.x = element_blank(), axis.title.y = element_blank())
+str_glutenins <- str_glutenins + theme(axis.title.x = element_blank(),axis.title.y = element_blank())
+
+fig1 <- ggarrange(
+  mir_plots[[1]], mir_plots[[2]], mir_plots[[3]], mir_plots[[4]], str_albumins, str_globulins, str_gliadins, str_glutenins,           
+  ncol = 4, nrow = 2,       
+  labels = c("A", "B", "C", "D", "E", "F", "G", "H", "I"),
+  common.legend = TRUE,
+  align = "hv",
+  hjust = -1.5,
+  vjust = 2,
+  font.label = list(size = 12, color = "black", face = "bold", family = "Arial")
+)
+
+# Add Common X-axis Label
+annotate_figure(fig1, 
+                bottom = text_grob(expression("Wavenumber (cm"^{-1}*")"), size = 14))
+```
+
+### Figure 2
+
+```{r}
+## combine with the calibrants
+fig2 <- ggarrange(
+  p_calibration, comparison_samples_plot,
+  ncol = 2,
+  labels = c("A", "B"),
+  widths = c(0.4, 0.6),
+  font.label = list(size = 13, color = "black", face = "bold", family = "Arial")
+)
+
+fig2
+```
+
+### Figure 3
+
+```{r}
+#Export the combined PCA
+fig3 <- ggarrange(
+  # Plots to arrange
+  d2_plot, d2_loading,         
+  ncol = 2, nrow = 1,       
+  labels = c("A", "B"),  
+  legend = "top",
+  widths = c(0.35, 0.65)
+)
+fig3
+```
+
+### Table S3
+
+```{r}
+avg_samples_drop <- do.call(rbind, avg_samples)
+
+tables3 <- avg_samples_drop[,c(5,6, 2,4)]
+```
+
+### Figure S2
+
+```{r}
+#raw
+mir_plots <- lapply(seq_along(avg_spectra_long), function(i){
+  df <- avg_spectra_long[[i]]
+  spectra_plot(input = df,
+               x = df[,2],
+               y = df[,3],
+               group = df[,1],
+               color = df[,4],
+               title = paste0("Raw Spectra of ", protein_titles[i]))
+})
+# d1
+#call the function for plotting
+mir_plots_d1 <- lapply(seq_along(avg_spectra_d1_long), function(i){
+  df <- avg_spectra_d1_long[[i]]
+  spectra_plot(input = df,
+               x = df[,2],
+               y = df[,3],
+               group = df[,1],
+               color = df[,4],
+               title = paste0("First Derivative Spectra of ", protein_titles[i]))
+})
+
+#call the function for plotting
+mir_plots_d2 <- lapply(seq_along(avg_spectra_d2_long), function(i){
+  df <- avg_spectra_d2_long[[i]]
+  spectra_plot(input = df,
+               x = df[,2],
+               y = df[,3],
+               group = df[,1],
+               color = df[,4],
+               title = paste0("Second Derivative Spectra of ", protein_titles[i]))
+})
+
+# albumins
+#Export the combined PCA
+figs2_alb <- ggarrange(
+  # Plots to arrange
+  mir_plots[[1]], mir_plots_d1[[1]], mir_plots_d2[[1]],         
+  ncol = 3, nrow = 1,       
+  labels = c("A", "B", "C"),  
+  legend = "top",
+  common.legend = T
+)
+figs2_alb
+
+# globulins
+#Export the combined PCA
+figs2_glo <- ggarrange(
+  # Plots to arrange
+  mir_plots[[2]], mir_plots_d1[[2]], mir_plots_d2[[2]],         
+  ncol = 3, nrow = 1,       
+  labels = c("A", "B", "C"),  
+  legend = "top",
+  common.legend = T
+)
+figs2_glo
+
+# gliadins
+#Export the combined PCA
+figs2_gli <- ggarrange(
+  # Plots to arrange
+  mir_plots[[3]], mir_plots_d1[[3]], mir_plots_d2[[3]],         
+  ncol = 3, nrow = 1,       
+  labels = c("A", "B", "C"),  
+  legend = "top",
+  common.legend = T
+)
+figs2_gli
+
+# glutenins
+#Export the combined PCA
+figs2_glu <- ggarrange(
+  # Plots to arrange
+  mir_plots[[4]], mir_plots_d1[[4]], mir_plots_d2[[4]],         
+  ncol = 3, nrow = 1,       
+  labels = c("A", "B", "C"),  
+  legend = "top",
+  common.legend = T
+)
+figs2_glu
+```
+
+### Figure S3
+
+```{r}
+rmc_plot
+ggexport(rmc_plot, width = 900, height = 1100, filename = "figures/figs3.tiff")
+
+rmc_stdev
+rmc
+```
+
+### Figure S4
+
+```{r}
+#Export the combined PCA
+figs4_d1 <- ggarrange(
+  # Plots to arrange
+  d1_plot, d1_loading,         
+  ncol = 2, nrow = 1,       
+  labels = c("A", "B"),  
+  legend = "top",
+  widths = c(0.35, 0.65)
+)
+figs4_d1
+
+#Export the combined PCA
+figs4_raw <- ggarrange(
+  # Plots to arrange
+  raw_plot, raw_loading,         
+  ncol = 2, nrow = 1,       
+  labels = c("A", "B"),  
+  legend = "top",
+  widths = c(0.35, 0.65)
+)
+figs4_raw
 ```
