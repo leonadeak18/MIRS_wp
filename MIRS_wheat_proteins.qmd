@@ -192,6 +192,66 @@ names(calibration_summary) <- protein_titles
 cal_summary <- do.call(rbind, calibration_summary)
 ```
 
+### Correction Factor
+
+```{r}
+#import the data
+cf <- read.csv('data/correction_factor.csv', header = T, sep = ',')
+cf$Type <- as.factor(cf$Type)
+
+#create reference
+gli_ref <- cf[1:12, 1:2]
+glu_ref <- cf[13:24,1:2]
+
+#dataframe preparation
+cf <- prepare_df(cf[,-2], 1480, 1710)
+cf <- smoothing(cf, width = 11, porder = 3)
+
+#split to be a list
+cf_list <- list(
+  gli = cf[1:12,],
+  glu = cf[13:24,]
+)
+
+#apply normalization and baseline correction
+cf_list <- lapply(cf_list, normalization)
+cf_list <- lapply(cf_list, baseline_corr)
+
+#integrate amide II band
+cf_amide2 <- list(
+  gli = prepare_df(cf_list$gli, 1480, 1586),
+  glu = prepare_df(cf_list$glu, 1480, 1584)
+)
+library(DescTools)
+cf_auc <- lapply(seq_along(cf_amide2), function(i){
+  df <- cf_amide2[[i]]
+  wavenumber <- as.numeric(colnames(df)[-1])
+  
+  # Calculate AUC for each row (spectrum)
+  auc_values <- apply(df[,-1], 1, function(j) {
+    AUC(wavenumber, j, method = "trapezoid")
+  })
+  return(auc_values)
+  })
+
+### Gliadins ####
+df_auc_gliadins <- cbind(gli_ref, area = cf_auc[[1]])
+#check significance
+t_test_gliadins <- t.test(df_auc_gliadins[1:6,3], df_auc_gliadins[7:12,3])
+print(t_test_gliadins) #p-value < 0.05
+# determine the correction factor
+cf_gliadin <- mean(df_auc_gliadins[7:12,3])/mean(df_auc_gliadins[1:6,3])
+
+
+### Glutenins ####
+df_auc_glutenins <- cbind(glu_ref, area = cf_auc[[2]])
+#check significance
+t_test_glutenins <- t.test(df_auc_glutenins[1:6,3], df_auc_glutenins[7:12,3])
+print(t_test_glutenins) #p-value < 0.05
+# determine the correction factor
+cf_glutenins <- mean(df_auc_glutenins[7:12,3])/mean(df_auc_glutenins[1:6,3])
+```
+
 ### Samples calculation
 
 ```{r}
@@ -235,9 +295,9 @@ auc_samples[[1]]$conc <- (auc_samples[[1]]$area - cal_summary$intercept[1])/cal_
 #globulins
 auc_samples[[2]]$conc <- (auc_samples[[2]]$area - cal_summary$intercept[2])/cal_summary$slope[2]*20*100/2000
 #gliadins
-auc_samples[[3]]$conc <- (auc_samples[[3]]$area - cal_summary$intercept[3])/cal_summary$slope[3]*30*100/2000
+auc_samples[[3]]$conc <- (auc_samples[[3]]$area - cal_summary$intercept[3])/cal_summary$slope[3]*30*100/2000 * cf_gliadin
 #glutenins
-auc_samples[[4]]$conc <- (auc_samples[[4]]$area - cal_summary$intercept[4])/cal_summary$slope[4]*30*100/2000
+auc_samples[[4]]$conc <- (auc_samples[[4]]$area - cal_summary$intercept[4])/cal_summary$slope[4]*30*100/2000 * cf_glutenins
 
 #removing some data that don't have a good replication
 auc_samples[[3]] <- auc_samples[[3]][-c(42, 63, 143, 145, 149, 156),]
@@ -446,7 +506,6 @@ p_calibration <- calibration_curve(df_calibrant,
                                    y = "mean_auc", 
                                    col = "proteins", 
                                    shape = "proteins")
-p_calibration
 ```
 
 #### Plot of Protein Fractions in each location
@@ -475,6 +534,43 @@ comparison_samples_plot <- comp_box_plot(df_samples,
                                          col = "location")
 
 
+```
+
+#### Plot of Correction Factor
+
+```{r}
+### gliadins ###
+#prepare the dataframe
+library(reshape2)
+cf_gli_long <- cbind(gli_ref, cf_list$gli[,-1])
+cf_gli_long <- melt(cf_gli_long)
+cf_gli_long$variable <- as.numeric(as.character(cf_gli_long$variable))
+#plotting
+cf_gli_plot <- spectra_plot2(
+  input = cf_gli_long, 
+  x = cf_gli_long[,3],
+  y = cf_gli_long[,4],
+  group = cf_gli_long[,1],
+  color = cf_gli_long[,2],
+  title = NULL,
+  ycap = "Normalized Absorbance (a.u.)")
+cf_gli_plot
+
+### glutenins ###
+#prepare dataframe
+cf_glu_long <- cbind(glu_ref, cf_list$glu[,-1])
+cf_glu_long <- melt(cf_glu_long)
+cf_glu_long$variable <- as.numeric(as.character(cf_glu_long$variable))
+#plotting
+cf_glu_plot <- spectra_plot2(
+  input = cf_glu_long, 
+  x = cf_glu_long[,3],
+  y = cf_glu_long[,4],
+  group = cf_glu_long[,1],
+  color = cf_glu_long[,2],
+  title = NULL,
+  ycap = "Normalized Absorbance (a.u.)")
+cf_glu_plot
 ```
 
 #### Relative Mean Comparison
@@ -724,7 +820,6 @@ mir_plots <- lapply(seq_along(avg_spectra_long), function(i){
                color = df[,4],
                title = NULL)
 })
-mir_plots[[4]]
 ```
 
 ```{r}
@@ -789,7 +884,7 @@ raw_plot <- pca_plot(all_sp_score, all_sp_pca, title = NULL)
 
 #loading plot
 raw_loading <- pca_combined_loading(all_sp_pca, NULL)
-raw_loading
+
 ```
 
 ```{r}
@@ -998,4 +1093,62 @@ figs4_raw <- ggarrange(
   widths = c(0.35, 0.65)
 )
 figs4_raw
+```
+
+### Figure S5
+
+```{r}
+#Export the correction factor
+cf_glu_plot <- cf_glu_plot + theme(axis.title.y = element_blank())
+
+figs5 <- ggarrange(
+  cf_gli_plot, cf_glu_plot,
+  ncol = 2, nrow = 1,
+  labels = c('A', 'B'),
+  legend = 'top',
+  common.legend = T,
+  align = 'hv'
+) 
+figs5
+```
+
+### Graphical Abstract
+
+```{r}
+abstract<- mir_plots[[3]] +
+                  theme(legend.position = "none",
+                  legend.text = element_text(size = 24),
+                  plot.title = element_blank(),
+                  panel.grid = element_blank(),
+                  axis.title = element_text(size = 24),
+                  axis.title.x = element_text(margin = margin(t = 3)),
+                  axis.text = element_text(size = 24),
+                  axis.title.y = element_text(margin = margin(r = 5)))
+ggsave("figures/gli.tiff", plot = abstract, width = 5, height = 3)
+```
+
+```{r}
+abstract2 <- p_calibration +
+                theme(legend.position = "top",
+                  legend.text = element_text(size = 36),
+                  plot.title = element_blank(),
+                  panel.grid = element_blank(),
+                  axis.title = element_text(size = 36),
+                  axis.title.x = element_text(margin = margin(t = 3)),
+                  axis.text = element_text(size = 36),
+                  axis.title.y = element_text(margin = margin(r = 5)))
+ggsave("figures/calibrant.tiff", plot = abstract2, width = 7, height = 6)
+```
+
+```{r}
+abstract3 <- d2_plot +
+                theme(legend.position = "top",
+                  legend.text = element_text(size = 36),
+                  plot.title = element_blank(),
+                  panel.grid = element_blank(),
+                  axis.title = element_text(size = 36),
+                  axis.title.x = element_text(margin = margin(t = 3)),
+                  axis.text = element_text(size = 36),
+                  axis.title.y = element_text(margin = margin(r = 5)))
+ggsave("figures/pca.tiff", plot = abstract3, width = 7, height = 6)
 ```

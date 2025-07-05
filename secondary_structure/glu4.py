@@ -6,22 +6,32 @@ from scipy.special import voigt_profile
 from scipy.signal import savgol_filter
 import matplotlib.pyplot as plt
 
-
 # Load the FTIR data
 data = pd.read_csv("data/glu4.csv", header=0)
 data.rename(columns={data.columns[0]: "wavenumber"}, inplace=True)
 
 # Preprocess the data
-processed_data = ss.preprocessing(data)
+pre_data = ss.preprocessing(data, window=7, normalize=False)
+valley_picking = ss.valley_peaks(pre_data)
+processed_data = ss.baseline_correction(pre_data, valley_picking.drop(valley_picking.index[1], axis=0))
 
 # Calculate the total area under the curve between 1600 and 1700
 wavenumber_zero = processed_data[processed_data["baseline_corrected"] == 0]
-area = ss.total_area(processed_data, w2 = wavenumber_zero.iloc[0,0], w1=wavenumber_zero.iloc[1,0])
+w1 = wavenumber_zero["wavenumber"].min()
+w2 = wavenumber_zero["wavenumber"].max()
+area = ss.total_area(processed_data, w1=w1, w2=w2)
 
 # deconvoluted the FTIR peaks
-xy = processed_data[(processed_data["wavenumber"] <= wavenumber_zero.iloc[0,0]) & (processed_data["wavenumber"] >= wavenumber_zero.iloc[1,0])]
+xy = processed_data[(processed_data["wavenumber"] <= w2) & (processed_data["wavenumber"] >= w1)]
 x = xy["wavenumber"]
 y = xy["baseline_corrected"]
+
+#plotting the FTIR data
+plt.figure(figsize=(7, 5))
+plt.plot(x, y, "bo", markersize=3, label="Experimental Data")
+plt.xlabel("Wavenumber (cm⁻¹)")
+plt.ylabel("Absorbance (a.u.)")
+plt.gca().invert_xaxis()
 
 ## Provide initial parameter guesses for 5 peaks
 initial_params = [
@@ -87,7 +97,7 @@ plt.show()
 peak_areas = []
 for i in range(7):
     peak_area = (
-        np.trapz(glu4["amplitudes"][i] * voigt_profile(sorted(x) - glu4["centers"][i], glu4["sigmas"][i], glu4["gammas"][i]), sorted(x))
+        np.trapezoid(glu4["amplitudes"][i] * voigt_profile(sorted(x) - glu4["centers"][i], glu4["sigmas"][i], glu4["gammas"][i]), sorted(x))
         / area* 100
     )
     peak_areas.append(peak_area)

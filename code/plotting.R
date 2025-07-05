@@ -95,6 +95,25 @@ spectra_plot <- function(input, x, y, group, color, title){
   return(df_chart)
 }
 
+spectra_plot2 <- function(input, x, y, group, color, title, ycap = ycap){
+  df_chart <- ggplot(input, aes(x = x, y = y, group = group, color=color)) +
+    geom_line(linewidth = 0.75) +
+    labs(x= expression("Wavenumber (cm"^{-1}*")"), y=ycap, title = title, color = NULL) +
+    scale_color_viridis_d(option = "D", direction = -1) +
+    theme_minimal(base_family = "Arial") +
+    scale_x_reverse() +  # This will reverse the x-axis
+    theme_bw() +
+    theme(legend.position = "right",
+          legend.text = element_text(size = 12),
+          plot.title = element_text(hjust = 0.5, margin = margin(b = 3)),
+          panel.grid = element_blank(),
+          axis.title = element_text(size = 12))
+  # axis.title.x = element_text(margin = margin(t = 3)),
+  # axis.title.y = element_text(margin = margin(r = 5)))
+  
+  return(df_chart)
+}
+
 pca_plot <- function(input, input2, title) {
   # Calculate the farthest distance from the origin
   max_x <- 1.25 *max(abs(input$`Comp 1`))

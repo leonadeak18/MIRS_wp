@@ -10,16 +10,28 @@ data = pd.read_csv("data/glo3.csv", header=0)
 data.rename(columns={data.columns[0]: "wavenumber"}, inplace=True)
 
 # Preprocess the data
-processed_data = ss.preprocessing(data)
+pre_data = ss.preprocessing(data, window=7, normalize=False)
+valley_picking = ss.valley_peaks(pre_data)
+processed_data = ss.baseline_correction(pre_data, valley_picking.drop(valley_picking.index[1:4], axis=0))
 
 # Calculate the total area under the curve between 1600 and 1700
 wavenumber_zero = processed_data[processed_data["baseline_corrected"] == 0]
-area = ss.total_area(processed_data, w2 = wavenumber_zero.iloc[0,0], w1=wavenumber_zero.iloc[1,0])
+w1 = wavenumber_zero["wavenumber"].min()
+w2 = wavenumber_zero["wavenumber"].max()
+area = ss.total_area(processed_data, w1=w1, w2=w2)
 
 # deconvoluted the FTIR peaks
-xy = processed_data[(processed_data["wavenumber"] <= wavenumber_zero.iloc[0,0]) & (processed_data["wavenumber"] >= wavenumber_zero.iloc[1,0])]
+xy = processed_data[(processed_data["wavenumber"] <= w2) & (processed_data["wavenumber"] >= w1)]
 x = xy["wavenumber"]
 y = xy["baseline_corrected"]
+
+#plotting the FTIR data
+plt.figure(figsize=(7, 5))
+plt.plot(x, y, "bo", markersize=3, label="Experimental Data")
+plt.xlabel("Wavenumber (cm⁻¹)")
+plt.ylabel("Absorbance (a.u.)")
+plt.gca().invert_xaxis()
+
 ## Provide initial parameter guesses for 5 peaks
 initial_params = [
     #Amplitude, Center, Sigma, Gamma
@@ -68,13 +80,11 @@ plt.title(f"adjusted R² = {glo3["r_squared_adj"]:.4f}, Reduced Chi² = {glo3["c
 plt.gca().invert_xaxis()
 plt.show()
 
-
-
 # Calculate the area under each peak
 peak_areas = []
 for i in range(5):
     peak_area = (
-        np.trapz(glo3["amplitudes"][i] * voigt_profile(sorted(x) - glo3["centers"][i], glo3["sigmas"][i], glo3["gammas"][i]), sorted(x))
+        np.trapezoid(glo3["amplitudes"][i] * voigt_profile(sorted(x) - glo3["centers"][i], glo3["sigmas"][i], glo3["gammas"][i]), sorted(x))
         / area* 100
     )
     peak_areas.append(peak_area)

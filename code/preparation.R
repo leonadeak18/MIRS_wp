@@ -55,3 +55,13 @@ combine <- function(input){
   })
   output <- do.call(cbind, rename_col)
 }
+
+#Normalization
+normalization <- function(input){
+  df <- input
+  spectra_scaled <- as.data.frame(t(apply(df[ , -1], 1, function(x){
+    (x - min(x)) / (max(x) - min(x))
+  })))
+  output <- as.data.frame(cbind(samples = df$samples, spectra_scaled))
+  return(output)
+}
