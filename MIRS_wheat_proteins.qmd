@@ -675,6 +675,84 @@ all_sp_d2_score <- all_sp_d2_score %>%
   mutate(location = as.factor(sub("_.*$", "", avg_spectra[[1]]$group)))
 ```
 
+### ASCA Analysis
+
+Model ASCA would be X = Xsites + Xprotein + Xinteraction + E
+
+#### Raw Spectra
+
+```{r}
+#import the Design of Experiment
+DoE <- read.csv("data/DoE.csv")
+DoE$Sites <- as.factor(DoE$Sites)
+DoE$Proteins <- as.factor(DoE$Proteins)
+
+#combine all data
+asca_proteins <- rbind(avg_spectra[[1]], avg_spectra[[2]], avg_spectra[[3]], avg_spectra[[4]])
+asca_proteins <- as.matrix(scale(asca_proteins[,-c(1,2,ncol(asca_proteins))]))
+
+#create asca dataframe
+asca_df <- data.frame(
+  wavenumber = I(asca_proteins),
+  area = DoE$Sites,
+  proteins = DoE$Proteins
+)
+
+#ASCA
+library(HDANOVA)
+asca_model <- asca(wavenumber ~ area + proteins + area:proteins, data = asca_df, permute = T)
+
+summary(asca_model)
+scoreplot(asca_model, factor = 'area', legendpos = 'bottomleft')
+scoreplot(asca_model, factor = 'proteins', legendpos = 'bottomleft')
+```
+
+#### First Derivative
+
+```{r}
+#combine all data
+asca_proteins_d1 <- rbind(avg_spectra_d1[[1]], avg_spectra_d1[[2]], avg_spectra_d1[[3]], avg_spectra_d1[[4]])
+asca_proteins_d1 <- as.matrix(scale(asca_proteins_d1[,-c(1,2,ncol(asca_proteins_d1))]))
+
+#create asca dataframe
+asca_df_d1 <- data.frame(
+  wavenumber = I(asca_proteins_d1),
+  area = DoE$Sites,
+  proteins = DoE$Proteins
+)
+
+#ASCA
+library(HDANOVA)
+asca_model_d1 <- asca(wavenumber ~ area + proteins + area:proteins, data = asca_df_d1, permute = T)
+
+summary(asca_model_d1)
+scoreplot(asca_model_d1, factor = 'area', legendpos = 'bottomleft')
+scoreplot(asca_model_d1, factor = 'proteins', legendpos = 'bottomleft')
+```
+
+#### Second Derivative
+
+```{r}
+#combine all data
+asca_proteins_d2 <- rbind(avg_spectra_d2[[1]], avg_spectra_d2[[2]], avg_spectra_d2[[3]], avg_spectra_d2[[4]])
+asca_proteins_d2 <- as.matrix(scale(asca_proteins_d2[,-c(1,2,ncol(asca_proteins_d2))]))
+
+#create asca dataframe
+asca_df_d2 <- data.frame(
+  wavenumber = I(asca_proteins_d2),
+  area = DoE$Sites,
+  proteins = DoE$Proteins
+)
+
+#ASCA
+library(HDANOVA)
+asca_model_d2 <- asca(wavenumber ~ area + proteins + area:proteins, data = asca_df_d2, permute = T)
+
+summary(asca_model_d2)
+scoreplot(asca_model_d2, factor = 'area', legendpos = 'bottomleft')
+scoreplot(asca_model_d2, factor = 'proteins', legendpos = 'bottomleft')
+```
+
 ### Secondary Structure
 
 #### Albumins
