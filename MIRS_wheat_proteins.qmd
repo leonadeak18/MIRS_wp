@@ -64,7 +64,7 @@ Data analysis procedures to be performed, which include both qualitative and qua
 
 ```{r}
 # import the samples data
-data <- read.csv("data/wheat_samples.csv")
+data <- read.csv("data/spectra_samples.csv")
 
 #prepare the dataframe
 source('code/preparation.R')
@@ -105,7 +105,7 @@ plotResiduals(hotelling_test[[4]], cgroup = categorize(hotelling_test[[4]]), sho
 
 ```{r}
 # importing the dataframe
-calibrant <- read.csv("data/calibrant.csv")
+calibrant <- read.csv("data/spectra_calibrants.csv")
 
 #prepare the dataframe
 source('code/preparation.R')
@@ -196,7 +196,7 @@ cal_summary <- do.call(rbind, calibration_summary)
 
 ```{r}
 #import the data
-cf <- read.csv('data/correction_factor.csv', header = T, sep = ',')
+cf <- read.csv('data/spectra_diff_extract_methods.csv', header = T, sep = ',')
 cf$Type <- as.factor(cf$Type)
 
 #create reference
@@ -250,6 +250,39 @@ t_test_glutenins <- t.test(df_auc_glutenins[1:6,3], df_auc_glutenins[7:12,3])
 print(t_test_glutenins) #p-value < 0.05
 # determine the correction factor
 cf_glutenins <- mean(df_auc_glutenins[7:12,3])/mean(df_auc_glutenins[1:6,3])
+```
+
+##### ASCA analysis
+
+Y = Xmethod + E
+
+```{r}
+library(HDANOVA)
+# Gliadins
+asca_cf_gli <- cf_list$gli
+asca_cf_gli_df <- data.frame(
+  wavenumber = I(scale(asca_cf_gli[,-c(1,2, 118, 119, 120)])),
+  method = as.factor(c(rep("Dupont", 6), rep("Schalk", 6)))
+)
+str(asca_cf_gli_df)
+
+asca_model_cf_gli <- asca(wavenumber ~ method, data = asca_cf_gli_df, permute = T)
+
+summary(asca_model_cf_gli)
+scoreplot(asca_model_cf_gli, factor = 'method', legendpos = 'bottomleft')
+
+#Glutenins
+asca_cf_glu <- cf_list$glu
+asca_cf_glu_df <- data.frame(
+  wavenumber = I(scale(asca_cf_glu[,-c(1,2, 118, 119, 120)])),
+  method = as.factor(c(rep("Dupont", 6), rep("Schalk", 6)))
+)
+str(asca_cf_glu_df)
+
+asca_model_cf_glu <- asca(wavenumber ~ method, data = asca_cf_glu_df, permute = T)
+
+summary(asca_model_cf_glu)
+scoreplot(asca_model_cf_glu, factor = 'method', legendpos = 'bottomleft')
 ```
 
 ### Samples calculation
@@ -332,7 +365,7 @@ cal_summary$rsd <- c(
 
 ```{r}
 #import the data
-loq <- read.csv("data/loq.csv")
+loq <- read.csv("data/spectra_blanks.csv")
 
 #prepare the dataframe
 loq <- prepare_df(loq, 1480, 1710)
@@ -482,6 +515,60 @@ rmc_stdev <- rm_comparison %>% group_by(Location) %>% summarise(across(1:4, ~2 *
 colnames(rmc_stdev)[2:5] <- protein_titles
 ```
 
+### NIRS with Total Proteins
+
+```{r}
+##import the nirs data
+nirs <- read.csv('data/nirs.csv')
+avg_samples_drop <- do.call(rbind, avg_samples)
+
+#combine with the total protein data
+nirs <- cbind(nirs, 
+              total_protein = rowSums(rm[,c(2:5)]), 
+              area = avg_samples_drop$location)
+str(nirs)
+
+#modelling
+nirs_model <- lm(NIRS ~ total_protein, data = nirs)
+
+#extract the Extract coefficients
+intercept <- round(coef(nirs_model)[1], 3)
+slope <- round(coef(nirs_model)[2], 3)
+r2 <- round(summary(nirs_model)$r.squared, 3)
+pval <- signif(summary(nirs_model)$coefficients[2, 4], 3)
+
+# 3. Create annotation text
+eq_label <- paste0("y = ", slope, "x + ", intercept)
+r2_label <- paste0("R² = ", r2)
+p_label <- paste0("p = ", pval)
+
+#plotting
+library(ggpubr)
+nirs_plot <- ggscatter(nirs, 
+                  x = "total_protein", 
+                  y = "NIRS",  
+                  color = "area", 
+                  size = 3) + 
+    geom_smooth(method = "lm", se = FALSE, color = "black", linetype = "dotted") +
+    theme_classic(base_family = "Arial") +
+    labs(y = "Crude Protein by NIRS (g/100 g)", 
+         x = "Total Proteins by ATR-MIR (g/100 g)", color = NULL) +
+    scale_color_manual(values = c("#fde725", "#35b779", "#31688e", "#440154")) +
+    annotate("text", x = 13, y = 9, label = r2_label, size = 6, hjust = 0) +
+    annotate("text", x = 13, y = 8.5, label = eq_label, size = 6, hjust = 0) +
+    annotate("text", x = 13, y = 8, label = p_label, size = 6, hjust = 0) +
+    theme(legend.position = "top",
+          legend.text = element_text(size = 12),
+          plot.title = element_text(hjust = 0.5, margin = margin(b = 3)),
+          panel.grid = element_blank(),
+          axis.title = element_text(size = 12),
+          axis.title.x = element_text(margin = margin(t = 3)),
+          axis.text = element_text(size = 12),
+          axis.title.y = element_text(margin = margin(r = 5)))
+
+print(nirs_plot)
+```
+
 ### Resume and Plotting
 
 #### Resume
@@ -506,6 +593,7 @@ p_calibration <- calibration_curve(df_calibrant,
                                    y = "mean_auc", 
                                    col = "proteins", 
                                    shape = "proteins")
+p_calibration
 ```
 
 #### Plot of Protein Fractions in each location
@@ -675,9 +763,9 @@ all_sp_d2_score <- all_sp_d2_score %>%
   mutate(location = as.factor(sub("_.*$", "", avg_spectra[[1]]$group)))
 ```
 
-### ASCA Analysis
+### ASCA Analysis 1
 
-Model ASCA would be X = Xsites + Xprotein + Xinteraction + E
+Model ASCA would be Y = Xsites + Xprotein + Xinteraction + E
 
 #### Raw Spectra
 
@@ -702,9 +790,12 @@ asca_df <- data.frame(
 library(HDANOVA)
 asca_model <- asca(wavenumber ~ area + proteins + area:proteins, data = asca_df, permute = T)
 
-summary(asca_model)
+# Explained variance of component 1 for 'area'
+names(asca_model)
+
 scoreplot(asca_model, factor = 'area', legendpos = 'bottomleft')
 scoreplot(asca_model, factor = 'proteins', legendpos = 'bottomleft')
+scoreplot(asca_model, factor = 'area:proteins', legendpos = 'bottomleft')
 ```
 
 #### First Derivative
@@ -750,7 +841,160 @@ asca_model_d2 <- asca(wavenumber ~ area + proteins + area:proteins, data = asca_
 
 summary(asca_model_d2)
 scoreplot(asca_model_d2, factor = 'area', legendpos = 'bottomleft')
+
 scoreplot(asca_model_d2, factor = 'proteins', legendpos = 'bottomleft')
+loadingplot(asca_model_d2, factor = 'area', label = "names")
+
+scoreplot(asca_model_d2, factor = 'area:proteins', legendpos = 'bottomleft')
+```
+
+### ASCA Analysis 2
+
+#### Raw Spectra
+
+Model ASCA would be Y = Xsites + E
+
+```{r}
+##import the data and remove the column that contain zero value
+asca_proteins2 <- all_sp[, colSums(all_sp == 0) == 0]
+asca_proteins2 <- as.matrix(scale(asca_proteins2))
+
+##create the ASCA dataframe
+asca_df2 <- data.frame(
+  wavenumber = I(asca_proteins2),
+  area = avg_samples$Albumins$location
+)
+
+#ASCA
+library(HDANOVA)
+asca_model2 <- asca(wavenumber ~ area, data = asca_df2, permute = T)
+
+summary(asca_model2)
+as.numeric(attr(scores(asca_model2, factor = "area"), "explvar")["Comp 1"])
+projections(asca_model2, factor = 'area')
+scoreplot(asca_model2, factor = 'area', legendpos = 'bottomleft')
+loadingplot(asca_model2, factor = 'area', label = "names")
+```
+
+#### First Derivative
+
+```{r}
+##import the data and remove the column that contain zero value
+asca_proteins2_d1 <- all_sp_d1[, colSums(all_sp_d1 == 0) == 0]
+asca_proteins2_d1 <- as.matrix(scale(asca_proteins2_d1))
+
+##create the ASCA dataframe
+asca_df2_d1 <- data.frame(
+  wavenumber = I(asca_proteins2_d1),
+  area = avg_samples$Albumins$location
+)
+
+#ASCA
+library(HDANOVA)
+asca_model2_d1 <- asca(wavenumber ~ area, data = asca_df2_d1, permute = T)
+
+summary(asca_model2_d1)
+scoreplot(asca_model2_d1, factor = 'area', legendpos = 'bottomleft')
+loadingplot(asca_model2_d1, factor = 'area', label = "names")
+```
+
+#### Second Derivative
+
+```{r}
+##import the data and remove the column that contain zero value
+asca_proteins2_d2 <- all_sp_d2[, colSums(all_sp_d2 == 0) == 0]
+asca_proteins2_d2 <- as.matrix(scale(asca_proteins2_d2))
+
+##create the ASCA dataframe
+asca_df2_d2 <- data.frame(
+  wavenumber = I(asca_proteins2_d2),
+  area = avg_samples$Albumins$location
+)
+
+#ASCA
+library(HDANOVA)
+asca_model2_d2 <- asca(wavenumber ~ area, data = asca_df2_d2, permute = T)
+
+summary(asca_model2_d2)
+scoreplot(asca_model2_d2, factor = 'area', legendpos = 'bottomleft')
+loadingplot(asca_model2_d2, factor = 'area', label = "names")
+```
+
+### ASCA Analysis 3
+
+#### Raw Spectra
+
+Model ASCA would be Y = Xsites + Xvariety + E
+
+```{r}
+#Import Design of Experiment
+DoE2 <- read.csv('data/DoE2.csv')
+DoE2[] <- lapply(DoE2, as.factor)
+
+##import the data and remove the column that contain zero value
+asca_proteins3 <- all_sp[, colSums(all_sp == 0) == 0]
+asca_proteins3 <- as.matrix(scale(asca_proteins3))
+
+##create the ASCA dataframe
+asca_df3 <- data.frame(
+  wavenumber = I(asca_proteins3),
+  area = DoE2$area,
+  variety = DoE2$variety
+)
+
+#ASCA
+library(HDANOVA)
+asca_model3 <- asca(wavenumber ~ area + variety, data = asca_df3, permute = T)
+
+summary(asca_model3)
+scoreplot(asca_model3, factor = 'area', legendpos = 'bottomleft')
+loadingplot(asca_model3, factor = 'area', label = "names")
+```
+
+#### First Derivative
+
+```{r}
+##import the data and remove the column that contain zero value
+asca_proteins2_d1 <- all_sp_d1[, colSums(all_sp_d1 == 0) == 0]
+asca_proteins2_d1 <- as.matrix(scale(asca_proteins2_d1))
+
+##create the ASCA dataframe
+asca_df3_d1 <- data.frame(
+  wavenumber = I(asca_proteins2_d1),
+  area = DoE2$area,
+  variety = DoE2$variety
+)
+
+#ASCA
+library(HDANOVA)
+asca_model3_d1 <- asca(wavenumber ~ area + variety, data = asca_df3_d1, permute = T)
+
+summary(asca_model3_d1)
+scoreplot(asca_model3_d1, factor = 'area', legendpos = 'bottomleft')
+loadingplot(asca_model3_d1, factor = 'area', label = "names")
+```
+
+#### Second Derivative
+
+```{r}
+##import the data and remove the column that contain zero value
+asca_proteins2_d2 <- all_sp_d2[, colSums(all_sp_d2 == 0) == 0]
+asca_proteins2_d2 <- as.matrix(scale(asca_proteins2_d2))
+
+##create the ASCA dataframe
+asca_df3_d2 <- data.frame(
+  wavenumber = I(asca_proteins2_d2),
+  area = DoE2$area,
+  variety = DoE2$variety
+)
+
+#ASCA
+library(HDANOVA)
+asca_model3_d2 <- asca(wavenumber ~ area + variety, data = asca_df3_d2, permute = T)
+
+summary(asca_model3_d2)
+scoreplot(asca_model3_d2, factor = 'area', legendpos = 'bottomleft')
+loadingplot(asca_model3_d2, factor = 'area', label = "names")
 ```
 
 ### Secondary Structure
@@ -759,7 +1003,7 @@ scoreplot(asca_model_d2, factor = 'proteins', legendpos = 'bottomleft')
 
 ```{r}
 ## import the dataframe
-str_alb <- read.csv("secondary_structure/data/p_alb.csv")
+str_alb <- read.csv("data/secondary_str_albumins.csv")
 
 #separate the dataframe
 wavenumber2 <- sort(str_alb[,14])
@@ -784,7 +1028,7 @@ str_albumins
 
 ```{r}
 ## import the dataframe
-str_glo <- read.csv("secondary_structure/data/p_glo.csv")
+str_glo <- read.csv("data/secondary_str_globulins.csv")
 
 #separate the dataframe
 wavenumber2 <- sort(str_glo[,14])
@@ -809,7 +1053,7 @@ str_globulins
 
 ```{r}
 ## import the dataframe
-str_gli <- read.csv("secondary_structure/data/p_gli.csv")
+str_gli <- read.csv("data/secondary_str_gliadins.csv")
 
 #separate the dataframe
 wavenumber2 <- sort(str_gli[,14])
@@ -833,7 +1077,7 @@ str_gliadins
 
 ```{r}
 ## import the dataframe
-str_glu <- read.csv("secondary_structure/data/p_glu.csv")
+str_glu <- read.csv("data/secondary_str_glutenins.csv")
 
 #separate the dataframe
 wavenumber2 <- sort(str_glu[,16])
@@ -962,7 +1206,7 @@ raw_plot <- pca_plot(all_sp_score, all_sp_pca, title = NULL)
 
 #loading plot
 raw_loading <- pca_combined_loading(all_sp_pca, NULL)
-
+raw_loading
 ```
 
 ```{r}
@@ -979,6 +1223,25 @@ d1_loading <- pca_combined_loading(all_sp_d1_pca, NULL)
 d2_plot <- pca_plot(all_sp_d2_score, all_sp_d2_pca, title = NULL)
 #loading plot
 d2_loading <- pca_combined_loading(all_sp_d2_pca, NULL)
+```
+
+#### ASCA
+
+```{r}
+source('code/plotting.R')
+#model2
+asca_model2_plot <- asca_plot(asca_model2, ftr = 'area',NULL)
+asca_model2_loading <- asca_loading(asca_model2, ftr = 'area',NULL)
+
+#model2_d1
+asca_model2_d1_plot <- asca_plot(asca_model2_d1, ftr = 'area',NULL)
+asca_model2_d1_loading <- asca_loading(asca_model2_d1, ftr = 'area',NULL)
+asca_model2_d1_plot
+
+#model2_d2
+asca_model2_d2_plot <- asca_plot(asca_model2_d2, ftr = 'area',NULL)
+asca_model2_d2_loading <- asca_loading(asca_model2_d2, ftr = 'area',NULL)
+asca_model2_d2_plot
 ```
 
 ## Data and Figure for Paper
@@ -1044,11 +1307,24 @@ fig3 <- ggarrange(
 fig3
 ```
 
+### Figure 3 - ASCA
+
+```{r}
+#Export the combined PCA
+fig3_asca <- ggarrange(
+  # Plots to arrange
+  asca_model2_d2_plot, asca_model2_d2_loading,         
+  ncol = 2, nrow = 1,       
+  labels = c("A", "B"),  
+  legend = "top",
+  widths = c(0.35, 0.65)
+)
+fig3_asca
+```
+
 ### Table S3
 
 ```{r}
-avg_samples_drop <- do.call(rbind, avg_samples)
-
 tables3 <- avg_samples_drop[,c(5,6, 2,4)]
 ```
 
@@ -1171,6 +1447,32 @@ figs4_raw <- ggarrange(
   widths = c(0.35, 0.65)
 )
 figs4_raw
+```
+
+### Figure S4 - ASCA
+
+```{r}
+#Export the combined PCA
+figs4_asca_d1 <- ggarrange(
+  # Plots to arrange
+  asca_model2_d1_plot, asca_model2_d1_loading,         
+  ncol = 2, nrow = 1,       
+  labels = c("A", "B"),  
+  legend = "top",
+  widths = c(0.35, 0.65)
+)
+figs4_asca_d1
+
+#Export the combined PCA
+figs4_asca_raw <- ggarrange(
+  # Plots to arrange
+  asca_model2_plot, asca_model2_loading,         
+  ncol = 2, nrow = 1,       
+  labels = c("A", "B"),  
+  legend = "top",
+  widths = c(0.35, 0.65)
+)
+figs4_asca_raw
 ```
 
 ### Figure S5

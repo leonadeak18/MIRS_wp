@@ -222,3 +222,92 @@ structure_plot <- function(input1, input2, col, label){
           axis.title = element_text(size = 12))
   return(p)
 }
+
+asca_plot <- function(input, ftr, title) {
+  df <- as.data.frame(input$projected[[ftr]])
+  df <- cbind(df, location = input$effects[[ftr]])
+  # Calculate the farthest distance from the origin
+  max_x <- 1.25 * max(abs(df$`Comp 1`))
+  max_y <- 1.25 * max(abs(df$`Comp 2`))
+  
+  #calculate %VarianceExplained
+  comp1 <- round(as.numeric(attr(scores(input, factor = ftr), "explvar")["Comp 1"]),1)
+  comp2 <- round(as.numeric(attr(scores(input, factor = ftr), "explvar")["Comp 2"]),1)
+  
+  p <- ggplot(data = df, aes(x = `Comp 1`, y = `Comp 2`, color = location, shape = location)) +
+    geom_point(size = 3) +
+    scale_color_viridis_d(option = "D", direction = -1) +
+    scale_shape_manual(values = c(15:18)) +
+    theme_minimal(base_family = "Arial") +
+    xlab(paste("PC1 (", round(comp1, 2), "%)", sep = "")) +
+    ylab(paste("PC2 (", round(comp2, 2), "%)", sep = "")) +
+    labs(color = NULL, title = title, shape = NULL) +
+    xlim(-max_x, max_x) + 
+    ylim(-max_y, max_y) + 
+    theme_bw() +
+    theme(legend.position = "top",
+          legend.text = element_text(size = 12),
+          plot.title = element_text(hjust = 0.5, margin = margin(b = 1), size = 12, face = "bold"),
+          panel.grid = element_blank(),
+          axis.text = element_text(size = 12),
+          axis.title = element_text(size = 12),
+          axis.title.x = element_text(margin = margin(t = 1)),
+          axis.title.y = element_text(margin = margin(r = 1))) +
+    geom_hline(yintercept = 0, linetype = "dotted", color = "black") + # Dotted horizontal line at y=0
+    geom_vline(xintercept = 0, linetype = "dotted", color = "black")
+  
+  
+  return(p)
+}
+
+#Loading plot for ASCA
+asca_loading <- function(input, ftr, title){
+  #create the dataframe first
+  df <- as.matrix(cbind(input$loadings[[ftr]]))
+  loadings <- df[,c(1:2)]
+  
+  #calculate %VarianceExplained
+  comp1 <- round(as.numeric(attr(scores(input, factor = ftr), "explvar")["Comp 1"]),1)
+  comp2 <- round(as.numeric(attr(scores(input, factor = ftr), "explvar")["Comp 2"]),1)
+  
+  xload <- paste("PC1 (", comp1, "%)")
+  yload <- paste("PC2 (", comp2, "%)")
+  colnames(loadings) <- c(xload, yload)
+  
+  #create a long version
+  loadings_long <- melt(loadings)
+  library(reshape2)
+  loadings_long <- loadings_long %>% 
+    separate(Var1, into = c("proteins", "wavenumber"), sep = "\\.", extra ="merge") %>%
+    mutate(
+      proteins = recode(proteins,
+                        alb = "Albumins",
+                        glo = "Globulins",
+                        gli = "Gliadins",
+                        glu = "Glutenins"),
+      proteins = factor(proteins, levels = c("Albumins", "Globulins", "Gliadins", "Glutenins"))
+    )
+  loadings_long$wavenumber <- as.numeric(loadings_long$wavenumber)
+  
+  output <- ggplot(loadings_long, aes(x = wavenumber, y = value, color = Var2, group = Var2)) +
+    geom_line() +
+    scale_color_manual(values = c("#0072B2", "#E69F00")) +
+    facet_wrap(~ proteins, nrow = 1) + # Separate charts by 'proteins'
+    labs(x= expression("Wavenumber (cm"^{-1}*")"), y="PC Loading", title = title, color = NULL) +
+    theme_minimal(base_family = "Arial") +
+    scale_x_reverse() +
+    theme_bw() +
+    theme(
+      strip.text = element_text(size = 12, face = "bold"),
+      legend.position = "top",
+      legend.text = element_text(size = 12),
+      axis.title = element_text(size = 12),
+      axis.text = element_text(size = 12),
+      panel.grid = element_blank(),
+      legend.margin = margin(t = 0, b = -10),
+      plot.title = element_text(hjust = 0.5, margin = margin(b = 1), size = 12, face = "bold"),
+      plot.margin = margin(t = 5, r = 5, b = 5, l = 5)
+    )
+  
+  return(output)
+}
