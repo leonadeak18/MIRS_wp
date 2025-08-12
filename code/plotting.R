@@ -6,6 +6,7 @@ library(showtext)
 library(ggpubr)
 library(reshape2)
 library(tidyr)
+library(plotly)
 
 #load font
 font_add("Arial", regular = "arial.ttf", bold = "arialbd.ttf")
@@ -223,6 +224,7 @@ structure_plot <- function(input1, input2, col, label){
   return(p)
 }
 
+#Plotting for ASCA model if only contains 4 factors
 asca_plot <- function(input, ftr, title) {
   df <- as.data.frame(input$projected[[ftr]])
   df <- cbind(df, location = input$effects[[ftr]])
@@ -260,7 +262,100 @@ asca_plot <- function(input, ftr, title) {
   return(p)
 }
 
-#Loading plot for ASCA
+#Plotting for ASCA model if data contain 5 - 20 factors
+asca_plot2 <- function(input, ftr, title) {
+  df <- as.data.frame(input$projected[[ftr]])
+  df <- cbind(df, factor = input$effects[[ftr]])
+  # Calculate the farthest distance from the origin
+  max_x <- 1.25 * max(abs(df$`Comp 1`))
+  max_y <- 1.25 * max(abs(df$`Comp 2`))
+  
+  #calculate %VarianceExplained
+  comp1 <- round(as.numeric(attr(scores(input, factor = ftr), "explvar")["Comp 1"]),1)
+  comp2 <- round(as.numeric(attr(scores(input, factor = ftr), "explvar")["Comp 2"]),1)
+  
+  p <- ggplot(data = df, aes(x = `Comp 1`, y = `Comp 2`, color = factor, shape = factor)) +
+    geom_point(size = 3) +
+    scale_color_viridis_d(option = "D", direction = -1) +
+    scale_shape_manual(values = c(0:20)) +
+    theme_minimal(base_family = "Arial") +
+    xlab(paste("PC1 (", round(comp1, 2), "%)", sep = "")) +
+    ylab(paste("PC2 (", round(comp2, 2), "%)", sep = "")) +
+    labs(color = NULL, title = title, shape = NULL) +
+    xlim(-max_x, max_x) + 
+    ylim(-max_y, max_y) + 
+    theme_bw() +
+    theme(legend.position = "top",
+          legend.text = element_text(size = 12),
+          plot.title = element_text(hjust = 0.5, margin = margin(b = 1), size = 12, face = "bold"),
+          panel.grid = element_blank(),
+          axis.text = element_text(size = 12),
+          axis.title = element_text(size = 12),
+          axis.title.x = element_text(margin = margin(t = 1)),
+          axis.title.y = element_text(margin = margin(r = 1))) +
+    geom_hline(yintercept = 0, linetype = "dotted", color = "black") + # Dotted horizontal line at y=0
+    geom_vline(xintercept = 0, linetype = "dotted", color = "black")
+  
+  
+  return(p)
+}
+
+asca_plot3d <- function(input, ftr, title) {
+  library(plotly)
+  library(HDANOVA)
+  
+  # Extract data and factor
+  df <- as.data.frame(input$projected[[ftr]])
+  df$factor <- as.factor(input$effects[[ftr]])
+  
+  # Create color palette
+  pal <- c(
+    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+    "#aec7e8", "#ffbb78", "#98df8a", "#ff9896", "#c5b0d5"
+  )
+  
+  # Axis limits
+  max_x <- 1.25 * max(abs(df$`Comp 1`))
+  max_y <- 1.25 * max(abs(df$`Comp 2`))
+  max_z <- 1.25 * max(abs(df$`Comp 3`))
+  
+  # Calculate % variance explained for Comp 1–3
+  comp1 <- round(as.numeric(attr(scores(input, factor = ftr), "explvar")["Comp 1"]),1)
+  comp2 <- round(as.numeric(attr(scores(input, factor = ftr), "explvar")["Comp 2"]),1)
+  comp3 <- round(as.numeric(attr(scores(input, factor = ftr), "explvar")["Comp 3"]),1)
+  
+  # Plot
+  p <- plot_ly(
+    data = df,
+    x = ~`Comp 1`, y = ~`Comp 2`, z = ~`Comp 3`,
+    color = ~factor,
+    colors = pal,
+    type = "scatter3d",
+    mode = "markers",
+    marker = list(size = 5)
+  ) %>%
+    layout(
+      title = list(text = title, font = list(size = 16)),
+      scene = list(
+        xaxis = list(title = paste0("PC1 (", comp1, "%)"), range = c(-max_x, max_x)),
+        yaxis = list(title = paste0("PC2 (", comp2, "%)"), range = c(-max_y, max_y)),
+        zaxis = list(title = paste0("PC3 (", comp3, "%)"), range = c(-max_z, max_z))
+      ),
+      legend = list(
+        orientation = "v",
+        x = 1.05,
+        y = 0.5,
+        xanchor = "left",
+        yanchor = "middle"
+      ),
+      margin = list(l = 0, r = 0, b = 0, t = 40)
+    )
+  
+  return(p)
+}
+
+#Loading plot for ASCA with all protein combination
 asca_loading <- function(input, ftr, title){
   #create the dataframe first
   df <- as.matrix(cbind(input$loadings[[ftr]]))
@@ -308,6 +403,46 @@ asca_loading <- function(input, ftr, title){
       plot.title = element_text(hjust = 0.5, margin = margin(b = 1), size = 12, face = "bold"),
       plot.margin = margin(t = 5, r = 5, b = 5, l = 5)
     )
+  
+  return(output)
+}
+
+#Loading plot for ASCA without protein combination
+asca_loading2 <- function(input, ftr, title){
+  #create the dataframe first
+  df <- as.matrix(cbind(input$loadings[[ftr]]))
+  loadings <- df[,c(1:2)]
+  
+  #calculate %VarianceExplained
+  comp1 <- round(as.numeric(attr(scores(input, factor = ftr), "explvar")["Comp 1"]),1)
+  comp2 <- round(as.numeric(attr(scores(input, factor = ftr), "explvar")["Comp 2"]),1)
+  
+  xload <- paste("PC1 (", comp1, "%)")
+  yload <- paste("PC2 (", comp2, "%)")
+  colnames(loadings) <- c(xload, yload)
+  
+  #create a long version
+  loadings_long <- melt(loadings)
+  loadings_long$Var1 <- as.numeric(as.character(loadings_long$Var1))
+  
+  output <- ggplot(loadings_long, aes(x = Var1, y = value, color = Var2, group = Var2)) +
+    geom_line() +
+    scale_color_manual(values = c("#0072B2", "#E69F00")) +
+    labs(x= expression("Wavenumber (cm"^{-1}*")"), y="PC Loading", title = title, color = NULL) +
+    theme_minimal(base_family = "Arial") +
+    scale_x_reverse() +
+    theme_bw() +
+    theme(
+      strip.text = element_text(size = 12, face = "bold"),
+      legend.position = "top",
+      legend.text = element_text(size = 12),
+      axis.title = element_text(size = 12),
+      axis.text = element_text(size = 12),
+      panel.grid = element_blank(),
+      legend.margin = margin(t = 0, b = -10),
+      plot.title = element_text(hjust = 0.5, margin = margin(b = 1), size = 12, face = "bold"),
+      plot.margin = margin(t = 5, r = 5, b = 5, l = 5)
+      )
   
   return(output)
 }

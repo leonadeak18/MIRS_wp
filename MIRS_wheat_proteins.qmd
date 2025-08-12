@@ -18,6 +18,7 @@ Data analysis procedures to be performed, which include both qualitative and qua
 2.  Quantitative Analysis
 
     -   Protein calibrant calculation
+    -   Correction factors
     -   Samples calculation
     -   Limit of Quantification
     -   Normality Test (Shapiro Wilk's Test)
@@ -33,6 +34,7 @@ Data analysis procedures to be performed, which include both qualitative and qua
 
     -   Pre-processing
     -   PCA analysis
+    -   ASCA analysis 1-4
     -   Secondary Structures
         -   Albumins
         -   Globulins
@@ -254,7 +256,7 @@ cf_glutenins <- mean(df_auc_glutenins[7:12,3])/mean(df_auc_glutenins[1:6,3])
 
 ##### ASCA analysis
 
-Y = Xmethod + E
+X = Xmethod + E
 
 ```{r}
 library(HDANOVA)
@@ -565,8 +567,6 @@ nirs_plot <- ggscatter(nirs,
           axis.title.x = element_text(margin = margin(t = 3)),
           axis.text = element_text(size = 12),
           axis.title.y = element_text(margin = margin(r = 5)))
-
-print(nirs_plot)
 ```
 
 ### Resume and Plotting
@@ -620,7 +620,6 @@ comparison_samples_plot <- comp_box_plot(df_samples,
                                          x = "protein",
                                          y = "mean_conc",
                                          col = "location")
-
 
 ```
 
@@ -765,7 +764,7 @@ all_sp_d2_score <- all_sp_d2_score %>%
 
 ### ASCA Analysis 1
 
-Model ASCA would be Y = Xsites + Xprotein + Xinteraction + E
+Model ASCA would be X = Xsites + Xprotein + Xsites:protein + E
 
 #### Raw Spectra
 
@@ -791,7 +790,7 @@ library(HDANOVA)
 asca_model <- asca(wavenumber ~ area + proteins + area:proteins, data = asca_df, permute = T)
 
 # Explained variance of component 1 for 'area'
-names(asca_model)
+summary(asca_model)
 
 scoreplot(asca_model, factor = 'area', legendpos = 'bottomleft')
 scoreplot(asca_model, factor = 'proteins', legendpos = 'bottomleft')
@@ -852,7 +851,7 @@ scoreplot(asca_model_d2, factor = 'area:proteins', legendpos = 'bottomleft')
 
 #### Raw Spectra
 
-Model ASCA would be Y = Xsites + E
+Model ASCA would be X = Xsites + E
 
 ```{r}
 ##import the data and remove the column that contain zero value
@@ -924,50 +923,61 @@ loadingplot(asca_model2_d2, factor = 'area', label = "names")
 
 #### Raw Spectra
 
-Model ASCA would be Y = Xsites + Xvariety + E
+Model ASCA would be X = Xsites + Xvariety + Xarea:variety + E
 
 ```{r}
 #Import Design of Experiment
 DoE2 <- read.csv('data/DoE2.csv')
 DoE2[] <- lapply(DoE2, as.factor)
+DoE2_expanded <- DoE2[rep(1:nrow(DoE2), each = 3), ]
 
 ##import the data and remove the column that contain zero value
-asca_proteins3 <- all_sp[, colSums(all_sp == 0) == 0]
+asca_proteins3 <- combine(prot_data_list)
 asca_proteins3 <- as.matrix(scale(asca_proteins3))
 
 ##create the ASCA dataframe
 asca_df3 <- data.frame(
   wavenumber = I(asca_proteins3),
-  area = DoE2$area,
-  variety = DoE2$variety
+  area = DoE2_expanded$area,
+  variety = DoE2_expanded$variety
 )
 
 #ASCA
 library(HDANOVA)
-asca_model3 <- asca(wavenumber ~ area + variety, data = asca_df3, permute = T)
+asca_model3 <- asca(wavenumber ~ area + variety + area:variety, data = asca_df3, permute = T)
 
 summary(asca_model3)
 scoreplot(asca_model3, factor = 'area', legendpos = 'bottomleft')
 loadingplot(asca_model3, factor = 'area', label = "names")
+
+scoreplot(asca_model3, factor = 'variety', legendpos = 'bottomleft')
+loadingplot(asca_model3, factor = 'variety', label = "names")
 ```
 
 #### First Derivative
 
 ```{r}
-##import the data and remove the column that contain zero value
-asca_proteins2_d1 <- all_sp_d1[, colSums(all_sp_d1 == 0) == 0]
-asca_proteins2_d1 <- as.matrix(scale(asca_proteins2_d1))
+# First derivative in all spectra
+spectra_d1 <- lapply(seq_along(prot_data_list), function(i){
+  derivative(prot_data_list[[i]], width = 11, porder = 3, dorder = 1)
+})
+
+##import the data
+asca_proteins3_d1 <- combine(spectra_d1)
+asca_proteins3_d1 <- as.matrix(scale(data.frame(lapply(asca_proteins3_d1, as.numeric))))
+
+str(asca_proteins3_d1)
 
 ##create the ASCA dataframe
 asca_df3_d1 <- data.frame(
-  wavenumber = I(asca_proteins2_d1),
-  area = DoE2$area,
-  variety = DoE2$variety
+  wavenumber = I(asca_proteins3_d1),
+  area = DoE2_expanded$area,
+  variety = DoE2_expanded$variety
 )
 
 #ASCA
 library(HDANOVA)
-asca_model3_d1 <- asca(wavenumber ~ area + variety, data = asca_df3_d1, permute = T)
+asca_model3_d1 <- asca(wavenumber ~ area + variety + area:variety, data = asca_df3_d1, permute = T)
 
 summary(asca_model3_d1)
 scoreplot(asca_model3_d1, factor = 'area', legendpos = 'bottomleft')
@@ -977,24 +987,135 @@ loadingplot(asca_model3_d1, factor = 'area', label = "names")
 #### Second Derivative
 
 ```{r}
-##import the data and remove the column that contain zero value
-asca_proteins2_d2 <- all_sp_d2[, colSums(all_sp_d2 == 0) == 0]
-asca_proteins2_d2 <- as.matrix(scale(asca_proteins2_d2))
+# Second derivative in all spectra
+spectra_d2 <- lapply(seq_along(prot_data_list), function(i){
+  derivative(prot_data_list[[i]], width = 11, porder = 3, dorder = 2)
+})
+
+##import the data
+asca_proteins3_d2 <- combine(spectra_d2)
+asca_proteins3_d2 <- as.matrix(scale(data.frame(lapply(asca_proteins3_d2, as.numeric))))
+
+str(asca_proteins3_d2)
 
 ##create the ASCA dataframe
 asca_df3_d2 <- data.frame(
-  wavenumber = I(asca_proteins2_d2),
-  area = DoE2$area,
-  variety = DoE2$variety
+  wavenumber = I(asca_proteins3_d2),
+  area = DoE2_expanded$area,
+  variety = DoE2_expanded$variety
 )
 
 #ASCA
 library(HDANOVA)
-asca_model3_d2 <- asca(wavenumber ~ area + variety, data = asca_df3_d2, permute = T)
+asca_model3_d2 <- asca(wavenumber ~ area + variety + area:variety, data = asca_df3_d2, permute = T)
 
 summary(asca_model3_d2)
-scoreplot(asca_model3_d2, factor = 'area', legendpos = 'bottomleft')
-loadingplot(asca_model3_d2, factor = 'area', label = "names")
+scoreplot(asca_model3_d2, factor = 'variety', legendpos = 'bottomleft')
+loadingplot(asca_model3_d2, factor = 'variety', label = "names")
+```
+
+### ASCA Analysis 4
+
+Model ASCA would be X = Xsites + Xvariety + Xsites:variety + E with second derivative data
+
+#### Albumins
+
+```{r}
+#import the data
+asca_albumins <- prot_data_list[[1]]
+asca_albumins <- derivative(asca_albumins, width = 11, porder = 3, dorder = 2)
+asca_albumins <- as.matrix(scale(data.frame(lapply(asca_albumins[,-1], as.numeric))))
+colnames(asca_albumins) <- sub("^X", "", colnames(asca_albumins))
+
+#create the ASCA dataframe
+asca_alb_df <- data.frame(
+  wavenumber = I(asca_albumins),
+  area = DoE2_expanded$area,
+  variety = DoE2_expanded$variety
+)
+
+#ASCA
+library(HDANOVA)
+asca_model_alb <- asca(wavenumber ~ area + variety + area:variety, data = asca_alb_df, permute = T)
+
+summary(asca_model_alb)
+scoreplot(asca_model_alb, factor = 'area', legendpos = 'bottomleft')
+loadingplot(asca_model_alb, factor = 'area', label = "names")
+```
+
+#### Globulins
+
+```{r}
+#import the data
+asca_globulins <- prot_data_list[[2]]
+asca_globulins <- derivative(asca_globulins, width = 11, porder = 3, dorder = 2)
+asca_globulins <- as.matrix(scale(data.frame(lapply(asca_globulins[,-1], as.numeric))))
+colnames(asca_globulins) <- sub("^X", "", colnames(asca_globulins))
+
+#create the ASCA dataframe
+asca_glo_df <- data.frame(
+  wavenumber = I(asca_globulins),
+  area = DoE2_expanded$area,
+  variety = DoE2_expanded$variety
+)
+
+#ASCA
+library(HDANOVA)
+asca_model_glo <- asca(wavenumber ~ area + variety + area:variety, data = asca_glo_df, permute = T)
+
+summary(asca_model_glo)
+scoreplot(asca_model_glo, factor = 'area', legendpos = 'bottomleft')
+loadingplot(asca_model_glo, factor = 'area', label = "names")
+```
+
+#### Gliadins
+
+```{r}
+#import the data
+asca_gliadins <- prot_data_list[[3]]
+asca_gliadins <- derivative(asca_gliadins, width = 11, porder = 3, dorder = 2)
+asca_gliadins <- as.matrix(scale(data.frame(lapply(asca_gliadins[,-1], as.numeric))))
+colnames(asca_gliadins) <- sub("^X", "", colnames(asca_gliadins))
+
+#create the ASCA dataframe
+asca_gli_df <- data.frame(
+  wavenumber = I(asca_gliadins),
+  area = DoE2_expanded$area,
+  variety = DoE2_expanded$variety
+)
+
+#ASCA
+library(HDANOVA)
+asca_model_gli <- asca(wavenumber ~ area + variety + area:variety, data = asca_gli_df, permute = T)
+
+summary(asca_model_gli)
+scoreplot(asca_model_gli, factor = 'area', legendpos = 'bottomleft')
+loadingplot(asca_model_gli, factor = 'area', label = "names")
+```
+
+#### Glutenins
+
+```{r}
+#import the data
+asca_glutenins <- prot_data_list[[4]]
+asca_glutenins <- derivative(asca_glutenins, width = 11, porder = 3, dorder = 2)
+asca_glutenins <- as.matrix(scale(data.frame(lapply(asca_glutenins[,-1], as.numeric))))
+colnames(asca_glutenins) <- sub("^X", "", colnames(asca_glutenins))
+
+#create the ASCA dataframe
+asca_glu_df <- data.frame(
+  wavenumber = I(asca_glutenins),
+  area = DoE2_expanded$area,
+  variety = DoE2_expanded$variety
+)
+
+#ASCA
+library(HDANOVA)
+asca_model_glu <- asca(wavenumber ~ area + variety + area:variety, data = asca_glu_df, permute = T)
+
+summary(asca_model_glu)
+scoreplot(asca_model_glu, factor = 'area', legendpos = 'bottomleft')
+loadingplot(asca_model_glu, factor = 'area', label = "names")
 ```
 
 ### Secondary Structure
@@ -1225,7 +1346,7 @@ d2_plot <- pca_plot(all_sp_d2_score, all_sp_d2_pca, title = NULL)
 d2_loading <- pca_combined_loading(all_sp_d2_pca, NULL)
 ```
 
-#### ASCA
+#### ASCA Analysis 2
 
 ```{r}
 source('code/plotting.R')
@@ -1236,12 +1357,127 @@ asca_model2_loading <- asca_loading(asca_model2, ftr = 'area',NULL)
 #model2_d1
 asca_model2_d1_plot <- asca_plot(asca_model2_d1, ftr = 'area',NULL)
 asca_model2_d1_loading <- asca_loading(asca_model2_d1, ftr = 'area',NULL)
-asca_model2_d1_plot
+asca_model2_d1_loading
 
 #model2_d2
 asca_model2_d2_plot <- asca_plot(asca_model2_d2, ftr = 'area',NULL)
 asca_model2_d2_loading <- asca_loading(asca_model2_d2, ftr = 'area',NULL)
-asca_model2_d2_plot
+asca_model2_d2_loading
+```
+
+#### ASCA Analysis 3
+
+```{r}
+### Area
+##Raw Data
+asca_model3_plot <- asca_plot(asca_model3, ftr = 'area', "Raw Data with Sampling Sites Effect")
+
+asca_model3_loading <- asca_loading(asca_model3, ftr = 'area', "Raw Data with Sampling Sites Effect")
+
+
+##First Derivative
+asca_model3_d1_plot <- asca_plot(asca_model3_d1, ftr = 'area', "First Derivative with Sampling Sites Effect")
+asca_model3_d1_loading <- asca_loading(asca_model3_d1, ftr = 'area', "First Derivative with Sampling Sites Effect")
+
+##Second Derivative
+asca_model3_d2_plot <- asca_plot(asca_model3_d2, ftr = 'area', "Second Derivative with Sampling Sites Effect")
+library(ggplot2)
+
+asca_model3_d2_loading <- asca_loading(asca_model3_d2, ftr = 'area', "Second Derivative with Sampling Sites Effect")
+
+
+## variety
+source('code/plotting.R')
+##Raw Data
+asca_model3_var_plot <- asca_plot2(asca_model3, ftr = 'variety', "Raw Data with Variety Effect")
+asca_model3_var_loading <- asca_loading(asca_model3, ftr = 'variety', "Raw Data with Variety Effect")
+
+## First Derivative
+asca_model3_var_d1_plot <- asca_plot2(asca_model3_d1, ftr = 'variety', "First Derivative with Variety Effect")
+asca_model3_var_d1_loading <- asca_loading(asca_model3_d1, ftr = 'variety', "First Derivative with Variety Effect")
+
+## Second Derivative
+asca_model3_var_d2_plot <- asca_plot2(asca_model3_d2, ftr = 'variety', "First Derivative with Variety Effect")
+asca_model3_var_d2_loading <- asca_loading(asca_model3_d2, ftr = 'variety', "First Derivative with Variety Effect")
+```
+
+#### ASCA Analysis 4
+
+```{r}
+source('code/plotting.R')
+#### Albumins ####
+## Area
+asca_model_alb_plot <- asca_plot(asca_model_alb, ftr = 'area', "Second Derivative of Albumins with Sampling Sites Effect")
+asca_model_alb_loading <- asca_loading2(asca_model_alb, ftr = 'area', "Second Derivative of Albumins with Sampling Sites Effect")
+
+## Variety
+asca_model_alb_var_plot <- asca_plot2(asca_model_alb, ftr = 'variety', "Second Derivative of Albumins with Variety Effect")
+asca_model_alb_var_loading <- asca_loading2(asca_model_alb, ftr = 'variety', "Second Derivative of Albumins with Variety Effect")
+
+
+#### Globulins ####
+## Area
+asca_model_glo_plot <- asca_plot(asca_model_glo, ftr = 'area', "Second Derivative of Globulins with Sampling Sites Effect")
+asca_model_glo_loading <- asca_loading2(asca_model_glo, ftr = 'area', "Second Derivative of Globulins with Sampling Sites Effect")
+
+## Variety
+asca_model_glo_var_plot <- asca_plot2(asca_model_glo, ftr = 'variety', "Second Derivative of Globulins with Variety Effect")
+asca_model_glo_var_loading <- asca_loading2(asca_model_glo, ftr = 'variety', "Second Derivative of Globulins with Variety Effect")
+
+#### Gliadins ####
+## Area
+asca_model_gli_plot <- asca_plot(asca_model_gli, ftr = 'area', "Second Derivative of Gliadins with Sampling Sites Effect")
+asca_model_gli_loading <- asca_loading2(asca_model_gli, ftr = 'area', "Second Derivative of Gliadins with Sampling Sites Effect")
+
+## Variety
+asca_model_gli_var_plot <- asca_plot2(asca_model_gli, ftr = 'variety', "Second Derivative of Gliadins with Variety Effect")
+asca_model_gli_var_loading <- asca_loading2(asca_model_gli, ftr = 'variety', "Second Derivative of Gliadins with Variety Effect")
+
+#### Glutenins ####
+## Area
+asca_model_glu_plot <- asca_plot(asca_model_glu, ftr = 'area', "Second Derivative of Glutenins with Sampling Sites Effect")
+asca_model_glu_loading <- asca_loading2(asca_model_glu, ftr = 'area', "Second Derivative of Glutenins with Sampling Sites Effect")
+
+## Variety
+asca_model_glu_var_plot <- asca_plot2(asca_model_glu, ftr = 'variety', "Second Derivative of Glutenins with Variety Effect")
+asca_model_glu_var_loading <- asca_loading2(asca_model_glu, ftr = 'variety', "Second Derivative of Glutenins with Variety Effect")
+```
+
+#### 3D Plotting for variety
+
+```{r}
+source('code/plotting.R')
+library(htmlwidgets)
+
+###ASCA analysis 3###
+##Raw data
+asca_model3_var_3dplot <- asca_plot3d(asca_model3, ftr = 'variety', "Raw Data with Variety Effect")
+htmlwidgets::saveWidget(asca_model3_var_3dplot, "Combine_Raw.html")
+
+##First Derivative
+asca_model3_var_d1_3dplot <- asca_plot3d(asca_model3_d1, ftr = 'variety', "First Derivative with Variety Effect")
+htmlwidgets::saveWidget(asca_model3_var_d1_3dplot, "Combine_d1.html")
+
+##Second Derivative
+asca_model3_var_d2_3dplot <- asca_plot3d(asca_model3_d2, ftr = 'variety', "Second Derivative with Variety Effect")
+htmlwidgets::saveWidget(asca_model3_var_d2_3dplot, "Combine_d2.html")
+
+###ASCA analysis 4###
+#albumins
+asca_model_alb_var_3dplot <- asca_plot3d(asca_model_alb, ftr = 'variety', "Second Derivative of Albumins with Variety Effect")
+htmlwidgets::saveWidget(asca_model_alb_var_3dplot, "alb.html")
+
+#globulins
+asca_model_glo_var_3dplot <- asca_plot3d(asca_model_glo, ftr = 'variety', "Second Derivative of Globulins with Variety Effect")
+htmlwidgets::saveWidget(asca_model_glo_var_3dplot, "glo.html")
+
+#gliadins
+asca_model_gli_var_3dplot <- asca_plot3d(asca_model_gli, ftr = 'variety', "Second Derivative of Gliadins with Variety Effect")
+htmlwidgets::saveWidget(asca_model_gli_var_3dplot, "gli.html")
+
+#glutenins
+asca_model_glu_var_3dplot <- asca_plot3d(asca_model_glu, ftr = 'variety', "Second Derivative of Glutenins with Variety Effect")
+htmlwidgets::saveWidget(asca_model_glu_var_3dplot, "glu.html")
 ```
 
 ## Data and Figure for Paper
@@ -1273,7 +1509,7 @@ fig1 <- ggarrange(
 )
 
 # Add Common X-axis Label
-annotate_figure(fig1, 
+fig1 <- annotate_figure(fig1, 
                 bottom = text_grob(expression("Wavenumber (cm"^{-1}*")"), size = 14))
 ```
 
@@ -1295,10 +1531,12 @@ fig2
 ### Figure 3
 
 ```{r}
+f3_plot <- asca_model3_d2_plot + labs(title = NULL)
+f3_loading <- asca_model3_d2_loading + labs(title = NULL)
 #Export the combined PCA
 fig3 <- ggarrange(
   # Plots to arrange
-  d2_plot, d2_loading,         
+  f3_plot, f3_loading,         
   ncol = 2, nrow = 1,       
   labels = c("A", "B"),  
   legend = "top",
@@ -1307,28 +1545,30 @@ fig3 <- ggarrange(
 fig3
 ```
 
-### Figure 3 - ASCA
-
-```{r}
-#Export the combined PCA
-fig3_asca <- ggarrange(
-  # Plots to arrange
-  asca_model2_d2_plot, asca_model2_d2_loading,         
-  ncol = 2, nrow = 1,       
-  labels = c("A", "B"),  
-  legend = "top",
-  widths = c(0.35, 0.65)
-)
-fig3_asca
-```
-
-### Table S3
+### Table S4
 
 ```{r}
 tables3 <- avg_samples_drop[,c(5,6, 2,4)]
 ```
 
-### Figure S2
+### Figure S1
+
+```{r}
+#Export the correction factor
+cf_glu_plot <- cf_glu_plot + theme(axis.title.y = element_blank())
+
+figs5 <- ggarrange(
+  cf_gli_plot, cf_glu_plot,
+  ncol = 2, nrow = 1,
+  labels = c('A', 'B'),
+  legend = 'top',
+  common.legend = T,
+  align = 'hv'
+) 
+figs5
+```
+
+### Figure S3
 
 ```{r}
 #raw
@@ -1413,7 +1653,13 @@ figs2_glu <- ggarrange(
 figs2_glu
 ```
 
-### Figure S3
+### Figure S4
+
+```{r}
+nirs_plot
+```
+
+### Figure S5
 
 ```{r}
 rmc_plot
@@ -1423,73 +1669,120 @@ rmc_stdev
 rmc
 ```
 
-### Figure S4
+### Figure S6
 
 ```{r}
-#Export the combined PCA
-figs4_d1 <- ggarrange(
-  # Plots to arrange
-  d1_plot, d1_loading,         
-  ncol = 2, nrow = 1,       
-  labels = c("A", "B"),  
-  legend = "top",
-  widths = c(0.35, 0.65)
-)
-figs4_d1
+#Export ASCA score plot for albumins
+fs6_alb_plot <- asca_model_alb_var_plot + labs(title = NULL) + theme(legend.position = "right")
+fs6_alb_loading <- asca_model_alb_var_loading + labs(title = NULL)
 
-#Export the combined PCA
-figs4_raw <- ggarrange(
+figs6_alb <- ggarrange(
   # Plots to arrange
-  raw_plot, raw_loading,         
+  fs6_alb_plot, fs6_alb_loading,         
   ncol = 2, nrow = 1,       
   labels = c("A", "B"),  
-  legend = "top",
-  widths = c(0.35, 0.65)
+  widths = c(0.5, 0.5)
 )
-figs4_raw
+figs6_alb
+
+#Export ASCA score plot for globulins
+fs6_glo_plot <- asca_model_glo_var_plot + labs(title = NULL) + theme(legend.position = "right")
+fs6_glo_loading <- asca_model_glo_var_loading + labs(title = NULL)
+
+figs6_glo <- ggarrange(
+  # Plots to arrange
+  fs6_glo_plot, fs6_glo_loading,         
+  ncol = 2, nrow = 1,       
+  labels = c("A", "B"),  
+  widths = c(0.5, 0.5)
+)
+figs6_glo
+
+#Export ASCA score plot for gliadins
+fs6_gli_plot <- asca_model_gli_var_plot + labs(title = NULL) + theme(legend.position = "right")
+fs6_gli_loading <- asca_model_gli_var_loading + labs(title = NULL)
+
+figs6_gli <- ggarrange(
+  # Plots to arrange
+  fs6_gli_plot, fs6_gli_loading,         
+  ncol = 2, nrow = 1,       
+  labels = c("A", "B"),  
+  widths = c(0.5, 0.5)
+)
+figs6_gli
+
+#Export ASCA score plot for glutenins
+fs6_glu_plot <- asca_model_glu_var_plot + labs(title = NULL) + theme(legend.position = "right")
+fs6_glu_loading <- asca_model_glu_var_loading + labs(title = NULL)
+
+figs6_glu <- ggarrange(
+  # Plots to arrange
+  fs6_glu_plot, fs6_glu_loading,         
+  ncol = 2, nrow = 1,       
+  labels = c("A", "B"),  
+  widths = c(0.5, 0.5)
+)
+figs6_glu
 ```
 
-### Figure S4 - ASCA
+### Figure S7
 
 ```{r}
-#Export the combined PCA
-figs4_asca_d1 <- ggarrange(
+#Export ASCA score plot for albumins
+fs7_alb_plot <- asca_model_alb_plot + labs(title = NULL)
+fs7_alb_loading <- asca_model_alb_loading + labs(title = NULL)
+
+figs7_alb <- ggarrange(
   # Plots to arrange
-  asca_model2_d1_plot, asca_model2_d1_loading,         
+  fs7_alb_plot, fs7_alb_loading,         
   ncol = 2, nrow = 1,       
   labels = c("A", "B"),  
   legend = "top",
   widths = c(0.35, 0.65)
 )
-figs4_asca_d1
+figs7_alb
 
-#Export the combined PCA
-figs4_asca_raw <- ggarrange(
+#Export ASCA score plot for globulins
+fs7_glo_plot <- asca_model_glo_plot + labs(title = NULL)
+fs7_glo_loading <- asca_model_glo_loading + labs(title = NULL)
+
+figs7_glo <- ggarrange(
   # Plots to arrange
-  asca_model2_plot, asca_model2_loading,         
+  fs7_glo_plot, fs7_glo_loading,         
   ncol = 2, nrow = 1,       
   labels = c("A", "B"),  
   legend = "top",
   widths = c(0.35, 0.65)
 )
-figs4_asca_raw
-```
+figs7_glo
 
-### Figure S5
+#Export ASCA score plot for gliadins
+fs7_gli_plot <- asca_model_gli_plot + labs(title = NULL)
+fs7_gli_loading <- asca_model_gli_loading + labs(title = NULL)
 
-```{r}
-#Export the correction factor
-cf_glu_plot <- cf_glu_plot + theme(axis.title.y = element_blank())
+figs7_gli <- ggarrange(
+  # Plots to arrange
+  fs7_gli_plot, fs7_gli_loading,         
+  ncol = 2, nrow = 1,       
+  labels = c("A", "B"),  
+  legend = "top",
+  widths = c(0.35, 0.65)
+)
+figs7_gli
 
-figs5 <- ggarrange(
-  cf_gli_plot, cf_glu_plot,
-  ncol = 2, nrow = 1,
-  labels = c('A', 'B'),
-  legend = 'top',
-  common.legend = T,
-  align = 'hv'
-) 
-figs5
+#Export ASCA score plot for glutenins
+fs7_glu_plot <- asca_model_glu_plot + labs(title = NULL)
+fs7_glu_loading <- asca_model_glu_loading + labs(title = NULL)
+
+figs7_glu <- ggarrange(
+  # Plots to arrange
+  fs7_glu_plot, fs7_glu_loading,         
+  ncol = 2, nrow = 1,       
+  labels = c("A", "B"),  
+  legend = "top",
+  widths = c(0.35, 0.65)
+)
+figs7_glu
 ```
 
 ### Graphical Abstract
